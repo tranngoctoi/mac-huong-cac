@@ -1,11 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  buildAlternativesResponseFormat,
+  buildBlocksResponseFormat,
+  buildBlockUpdatesResponseFormat,
+  buildEditedTextResponseFormat,
   buildInteractionGenerationConfig,
   createWire1HeartbeatStream,
   extractInteractionText,
   geminiKeyPool,
-  normalizeThinkingLevel,
   parseTriedKeysHeader,
+  resolveThinkingLevelForModel,
   safeParseInteractionJson,
 } from '@/lib/gemini-server';
 import {
@@ -50,7 +54,7 @@ export async function POST(req: NextRequest) {
   const routeStartMs = Date.now();
   let selectedModel = 'gemini-flash-latest';
   let cleanFallbackModel: string | undefined;
-  let resolvedThinkingLevel = normalizeThinkingLevel('high');
+  let resolvedThinkingLevel = resolveThinkingLevelForModel('high', selectedModel);
   let actionForTrace: string = 'polish';
 
   let body: {
@@ -107,7 +111,6 @@ export async function POST(req: NextRequest) {
       } = body;
 
       actionForTrace = action;
-      resolvedThinkingLevel = normalizeThinkingLevel(thinkingLevel);
 
       selectedModel =
         typeof model === 'string' && model.trim()
@@ -118,6 +121,11 @@ export async function POST(req: NextRequest) {
         typeof fallbackModel === 'string' && fallbackModel.trim()
           ? fallbackModel.trim()
           : undefined;
+
+      resolvedThinkingLevel = resolveThinkingLevelForModel(
+        thinkingLevel,
+        selectedModel
+      );
 
       logger.info(
         'AI_EDITOR',
@@ -230,14 +238,10 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
           2
         );
 
-        const idPropertySchema: Record<string, unknown> = {
-          type: 'string',
-          description:
-            'Mã định danh block nguyên gốc (TITLE, P0001, P0002...). Phải khớp 1:1 với rawBlocks.',
-        };
-        if (expectedBlockIds.length <= 64) {
-          idPropertySchema.enum = expectedBlockIds;
-        }
+        const responseFormatSchema = buildBlocksResponseFormat(
+          expectedBlockIds,
+          'Danh sách đầy đủ các block đã biên tập và căn chỉnh 1:1 theo đúng thứ tự rawBlocks (bắt đầu bằng TITLE, tiếp theo là P0001, P0002...).'
+        );
 
         const {
           result: interaction,
@@ -254,34 +258,11 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
               system_instruction: fullRealignSystemPrompt,
               input: wirePayload,
               generation_config: buildInteractionGenerationConfig(
-                resolvedThinkingLevel,
-                { temperature: 0.25 }
+                thinkingLevel,
+                undefined,
+                slotInfo.activeModel
               ),
-              response_format: {
-                type: 'object',
-                properties: {
-                  blocks: {
-                    type: 'array',
-                    description:
-                      'Danh sách đầy đủ các block đã biên tập và căn chỉnh 1:1 theo đúng thứ tự rawBlocks (bắt đầu bằng TITLE, tiếp theo là P0001, P0002...).',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        id: idPropertySchema,
-                        translation: {
-                          type: 'string',
-                          description:
-                            'Bản tiếng Việt đã căn chỉnh đúng vị trí ID và biên tập sạch chữ Hán / lỗi QA (1 đoạn duy nhất, không chứa ký tự xuống dòng).',
-                        },
-                      },
-                      required: ['id', 'translation'],
-                      additionalProperties: false,
-                    },
-                  },
-                },
-                required: ['blocks'],
-                additionalProperties: false,
-              },
+              response_format: responseFormatSchema,
             });
           },
           selectedModel,
@@ -295,11 +276,23 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
           }
         );
 
+        resolvedThinkingLevel = resolveThinkingLevelForModel(
+          thinkingLevel,
+          modelUsed
+        );
+
+        const contextLabel = `RealignChapter[${reqId}]`;
         const rawJson = safeParseInteractionJson<{
           blocks?: Array<{ id: string; translation: string }>;
-        }>(extractInteractionText(interaction), `RealignChapter[${reqId}]`);
+        }>(extractInteractionText(interaction, contextLabel), contextLabel);
 
-        const cleanedBlocks = (rawJson.blocks || []).map((b) => ({
+        if (!Array.isArray(rawJson.blocks) || rawJson.blocks.length === 0) {
+          throw new Error(
+            '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng mảng "blocks" đang rỗng khi căn chỉnh chương.'
+          );
+        }
+
+        const cleanedBlocks = rawJson.blocks.map((b) => ({
           id: String(b.id || '').trim(),
           translation: normalizeVietnameseText(String(b.translation || ''))
             .replace(/\r?\n+/g, ' ')
@@ -311,6 +304,15 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
           rawBlocks,
           chapterNumber || 1
         );
+
+        if (
+          rawBodyCount > 0 &&
+          materialized.alignment.translatedBlockCount === 0
+        ) {
+          throw new Error(
+            `[INVALID_STRUCTURED_OUTPUT] Kết quả căn chỉnh chương không có đoạn thân nào hợp lệ khớp với rawBlocks.`
+          );
+        }
 
         const routeDurationMs = Date.now() - routeStartMs;
         const debugTrace: ServerDebugTrace = {
@@ -336,6 +338,9 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
             returnedBlocks: cleanedBlocks.length,
             isAligned: materialized.alignment.isAligned,
             missingIdsCount: materialized.missingIds.length,
+            duplicateIdsCount: materialized.duplicateIds.length,
+            emptyIdsCount: materialized.emptyIds.length,
+            unexpectedIdsCount: materialized.unexpectedIds.length,
           },
           attempts,
         };
@@ -361,7 +366,9 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
             translatedContent: materialized.translatedContent,
             alignment: materialized.alignment,
             missingIds: materialized.missingIds,
+            duplicateIds: materialized.duplicateIds,
             emptyIds: materialized.emptyIds,
+            unexpectedIds: materialized.unexpectedIds,
             modelUsed,
             thinkingLevelUsed: resolvedThinkingLevel,
             didFallback,
@@ -382,6 +389,7 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
         }
 
         const targetIds = targets.map((t) => t.id);
+        const expectedTargetIdSet = new Set(targetIds);
 
         const wirePayload = JSON.stringify(
           {
@@ -394,13 +402,7 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
           2
         );
 
-        const idPropertySchema: Record<string, unknown> = {
-          type: 'string',
-          description: 'Mã Block ID (TITLE, P0001, P0002...).',
-        };
-        if (targetIds.length <= 64) {
-          idPropertySchema.enum = targetIds;
-        }
+        const responseFormatSchema = buildBlockUpdatesResponseFormat(targetIds);
 
         const {
           result: interaction,
@@ -417,34 +419,11 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
               system_instruction: systemPrompt,
               input: wirePayload,
               generation_config: buildInteractionGenerationConfig(
-                resolvedThinkingLevel,
-                { temperature: 0.2 }
+                thinkingLevel,
+                undefined,
+                slotInfo.activeModel
               ),
-              response_format: {
-                type: 'object',
-                properties: {
-                  updates: {
-                    type: 'array',
-                    description:
-                      'Danh sách các block đã được làm sạch tương ứng 1:1 với các id trong targets.',
-                    items: {
-                      type: 'object',
-                      properties: {
-                        id: idPropertySchema,
-                        translation: {
-                          type: 'string',
-                          description:
-                            'Bản tiếng Việt hoàn chỉnh, sạch 100% Hán tự và từ tiếng Anh thừa, không xuống dòng.',
-                        },
-                      },
-                      required: ['id', 'translation'],
-                      additionalProperties: false,
-                    },
-                  },
-                },
-                required: ['updates'],
-                additionalProperties: false,
-              },
+              response_format: responseFormatSchema,
             });
           },
           selectedModel,
@@ -458,15 +437,30 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
           }
         );
 
+        resolvedThinkingLevel = resolveThinkingLevelForModel(
+          thinkingLevel,
+          modelUsed
+        );
+
+        const contextLabel = `BlockCleanup[${reqId}]`;
         const rawJson = safeParseInteractionJson<{
           updates?: Array<{ id: string; translation: string }>;
-        }>(extractInteractionText(interaction), `BlockCleanup[${reqId}]`);
-        const cleanedUpdates = (rawJson.updates || []).map((u) => ({
-          id: String(u.id || '').trim(),
-          translation: normalizeVietnameseText(String(u.translation || ''))
-            .replace(/\r?\n+/g, ' ')
-            .trim(),
-        }));
+        }>(extractInteractionText(interaction, contextLabel), contextLabel);
+
+        if (!Array.isArray(rawJson.updates) || rawJson.updates.length === 0) {
+          throw new Error(
+            '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng mảng "updates" đang rỗng.'
+          );
+        }
+
+        const cleanedUpdates = rawJson.updates
+          .map((u) => ({
+            id: String(u.id || '').trim(),
+            translation: normalizeVietnameseText(String(u.translation || ''))
+              .replace(/\r?\n+/g, ' ')
+              .trim(),
+          }))
+          .filter((u) => expectedTargetIdSet.has(u.id) && u.translation.length > 0);
 
         const routeDurationMs = Date.now() - routeStartMs;
         const debugTrace: ServerDebugTrace = {
@@ -511,15 +505,17 @@ QUY TẮC BẮT BUỘC KHI BIÊN TẬP & CĂN CHỈNH LẠI TOÀN CHƯƠNG (CHAP
         };
       }
 
-      // MODE 2: 3 Alternative Phrasings
+      // MODE 2: 3 Alternative Phrasings (`{"alternatives":["...","...","..."]}`)
       if (action === 'alternatives') {
-        const promptText = `Hãy đưa ra 3 phương án diễn đạt tiếng Việt khác nhau (1: Giàu chất cổ phong/tiên hiệp; 2: Tự nhiên, gãy gọn, hiện đại dễ đọc; 3: Giàu cảm xúc, nhấn mạnh khí thế/nội tâm) cho đoạn văn sau:
+        const promptText = `Hãy đưa ra đúng 3 phương án diễn đạt tiếng Việt khác nhau (Phương án 1: Giàu chất cổ phong/tiên hiệp; Phương án 2: Tự nhiên, gãy gọn, hiện đại dễ đọc; Phương án 3: Giàu cảm xúc, nhấn mạnh khí thế/nội tâm) cho đoạn văn sau. Chỉ trả về JSON theo đúng Chế độ D: {"alternatives":["Phương án 1","Phương án 2","Phương án 3"]}.
 
 [ĐOẠN VĂN CẦN GỢI Ý]:
 ${selectedText}
 
 ${rawReference ? `[NGUYÊN BẢN TIẾNG TRUNG THAM CHIẾU]:\n${rawReference}\n` : ''}
 ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}`;
+
+        const responseFormatSchema = buildAlternativesResponseFormat(3);
 
         const {
           result: interaction,
@@ -536,21 +532,11 @@ ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}
               system_instruction: systemPrompt,
               input: promptText,
               generation_config: buildInteractionGenerationConfig(
-                resolvedThinkingLevel,
-                { temperature: 0.65 }
+                thinkingLevel,
+                undefined,
+                slotInfo.activeModel
               ),
-              response_format: {
-                type: 'object',
-                properties: {
-                  alternatives: {
-                    type: 'array',
-                    items: { type: 'string' },
-                    description: '3 phương án viết lại đoạn văn.',
-                  },
-                },
-                required: ['alternatives'],
-                additionalProperties: false,
-              },
+              response_format: responseFormatSchema,
             });
           },
           selectedModel,
@@ -564,16 +550,28 @@ ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}
           }
         );
 
+        resolvedThinkingLevel = resolveThinkingLevelForModel(
+          thinkingLevel,
+          modelUsed
+        );
+
+        const contextLabel = `Alternatives[${reqId}]`;
         const parsed = safeParseInteractionJson<{
           alternatives?: string[];
-        }>(extractInteractionText(interaction), `Alternatives[${reqId}]`);
+        }>(extractInteractionText(interaction, contextLabel), contextLabel);
+        const cleanedAlternatives = (parsed.alternatives || [])
+          .map((s) => normalizeVietnameseText(String(s || '')).trim())
+          .filter(Boolean);
+        if (cleanedAlternatives.length === 0) {
+          throw new Error(
+            '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng mảng "alternatives" đang rỗng.'
+          );
+        }
         const routeDurationMs = Date.now() - routeStartMs;
         return {
           status: 200,
           body: {
-            alternatives: (parsed.alternatives || []).map((s) =>
-              normalizeVietnameseText(s)
-            ),
+            alternatives: cleanedAlternatives,
             modelUsed,
             thinkingLevelUsed: resolvedThinkingLevel,
             didFallback,
@@ -597,7 +595,7 @@ ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}
         };
       }
 
-      // MODE 3: Single-Passage or Full-Chapter Editorial Action
+      // MODE 3: Single-Passage or Full-Chapter Editorial Action (`{"translation":"..."}`)
       let taskInstruction = '';
       if (action === 'polish') {
         taskInstruction =
@@ -619,12 +617,15 @@ ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}
       }
 
       const promptText = `${taskInstruction}
+Chỉ trả về JSON hợp lệ theo đúng Chế độ A: {"translation":"Toàn bộ nội dung tiếng Việt sau khi biên tập"}.
 
 [VĂN BẢN CẦN XỬ LÝ]:
 ${selectedText}
 
 ${rawReference ? `[NGUYÊN BẢN TIẾNG TRUNG ĐỐI CHIẾU]:\n${rawReference}\n` : ''}
 ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}`;
+
+      const responseFormatSchema = buildEditedTextResponseFormat();
 
       const {
         result: interaction,
@@ -641,20 +642,11 @@ ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}
             system_instruction: systemPrompt,
             input: promptText,
             generation_config: buildInteractionGenerationConfig(
-              resolvedThinkingLevel,
-              { temperature: 0.3 }
+              thinkingLevel,
+              undefined,
+              slotInfo.activeModel
             ),
-            response_format: {
-              type: 'object',
-              properties: {
-                editedText: {
-                  type: 'string',
-                  description: 'Văn bản sau khi đã biên tập hoàn chỉnh.',
-                },
-              },
-              required: ['editedText'],
-              additionalProperties: false,
-            },
+            response_format: responseFormatSchema,
           });
         },
         selectedModel,
@@ -668,15 +660,35 @@ ${surroundingContext ? `[NGỮ CẢNH XUNG QUANH]:\n${surroundingContext}` : ''}
         }
       );
 
+      resolvedThinkingLevel = resolveThinkingLevelForModel(
+        thinkingLevel,
+        modelUsed
+      );
+
+      const contextLabel = `Assist:${action}[${reqId}]`;
       const parsed = safeParseInteractionJson<{
+        translation?: string;
         editedText?: string;
-      }>(extractInteractionText(interaction), `Assist:${action}[${reqId}]`);
+      }>(extractInteractionText(interaction, contextLabel), contextLabel);
+
+      const resolvedEditedText =
+        typeof parsed.translation === 'string' && parsed.translation.trim()
+          ? parsed.translation
+          : typeof parsed.editedText === 'string' && parsed.editedText.trim()
+            ? parsed.editedText
+            : '';
+
+      if (!resolvedEditedText) {
+        throw new Error(
+          '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng trường "translation" đang trống.'
+        );
+      }
 
       const routeDurationMs = Date.now() - routeStartMs;
       return {
         status: 200,
         body: {
-          resultText: normalizeVietnameseText(parsed.editedText || selectedText),
+          resultText: normalizeVietnameseText(resolvedEditedText),
           modelUsed,
           thinkingLevelUsed: resolvedThinkingLevel,
           didFallback,

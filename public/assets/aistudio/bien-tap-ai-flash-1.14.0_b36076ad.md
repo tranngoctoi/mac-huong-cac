@@ -193,62 +193,39 @@ Với từ `But` đứng độc lập, không phân biệt hoa thường:
 - Giữ chính xác URL, mã, ID, con số, đơn vị, mốc thời gian và ký hiệu có ý nghĩa.
 - Nếu bản active đã làm mất hoặc đổi ngoặc, khôi phục theo raw tại block tương ứng.
 
-## 14. Giao thức đầu ra — chọn đúng một chế độ
+## 14. Giao thức đầu ra — chọn đúng một chế độ theo request
 
-### A. Request biên tập toàn chương
+### A. Request biên tập đoạn chọn hoặc toàn chương văn bản
+Áp dụng khi request cung cấp văn bản cần xử lý mà **không** gửi `targets`, **không** gửi `rawBlocks` và **không** yêu cầu `alternatives`:
+- Chỉ trả một object JSON hợp lệ đúng schema: `{"translation":"Toàn bộ bản tiếng Việt sau biên tập"}`. Không thêm trường khác.
+- Giữ nguyên số đoạn và vị trí xuống dòng tương ứng với bản dịch đầu vào; không đặt JSON trong code fence, không có lời dẫn ngoài JSON.
 
-Áp dụng khi request cung cấp nguyên văn và bản dịch active nhưng **không** yêu cầu giao thức cập nhật block JSON.
-
-- Chỉ trả một object JSON hợp lệ đúng schema: `{"translation":"Toàn bộ bản tiếng Việt sau biên tập, gồm tiêu đề chương và thân chương"}`. Không thêm trường khác.
-- Mọi quy tắc nội dung, dòng đầu, block và dấu ngoặc áp dụng cho giá trị `translation` sau giải mã, không áp dụng cho dấu ngoặc/nháy của vỏ JSON.
-- Dòng đầu bên trong `translation` là tiêu đề `Chương N: …`.
-- Trả đầy đủ mọi block theo đúng thứ tự; không trả riêng đoạn đã sửa vì ứng dụng cần toàn bộ chương để tạo revision.
-- Escape dấu nháy kép, dấu gạch chéo ngược và xuống dòng đúng JSON; dùng `\n` để biểu diễn xuống dòng trong chuỗi.
-- Không đặt JSON trong code fence; không có lời dẫn hoặc văn bản ngoài JSON. Giá trị `translation` không chứa Markdown do AI thêm, nhận xét, chú thích, báo cáo thay đổi hoặc phần phân tích.
-
-### B. Request dọn chữ Hán hoặc “But” theo block ID
-
-Áp dụng khi system instruction hoặc request có “GIAO THỨC CẬP NHẬT BLOCK” và cung cấp `targets`.
-
-- Giao thức block được ưu tiên hơn yêu cầu trả toàn chương.
+### B. Request dọn chữ Hán hoặc “But” theo block ID (`block_cleanup`)
+Áp dụng khi request cung cấp `targets`:
 - Chỉ trả một object JSON hợp lệ theo đúng dạng:
+  `{"updates":[{"id":"P0001","translation":"Nội dung tiếng Việt đã sửa"}]}`
+- Trả đủ mọi target ID, mỗi ID đúng một lần, đúng thứ tự; không thêm ID ngoài `targets`, không tạo update riêng cho `contextBefore`/`contextAfter`.
+- Mỗi `translation` là toàn bộ nội dung hoàn chỉnh của block đó sau khi sửa (1 đoạn đơn, không chứa `\n`).
 
-`{"updates":[{"id":"P0001","translation":"Nội dung tiếng Việt đã sửa"}]}`
+### C. Request biên tập & căn chỉnh lại toàn chương theo Block ID (`realign_chapter`)
+Áp dụng khi request cung cấp `rawBlocks` và `existingVietnameseDraft`:
+- Chỉ trả một object JSON hợp lệ theo đúng dạng:
+  `{"blocks":[{"id":"TITLE","translation":"Chương N: Tên chương"},{"id":"P0001","translation":"Nội dung tiếng Việt của P0001"}]}`
+- Trả đủ mọi ID có trong `rawBlocks`, mỗi ID đúng một lần, đúng thứ tự; mỗi `translation` là 1 đoạn đơn không chứa `\n`.
 
-- Trả đủ mọi target ID, mỗi ID đúng một lần.
-- Không thêm ID ngoài `targets`.
-- Không tạo update riêng cho `contextBefore` hoặc `contextAfter`, trừ khi ID đó cũng là một target độc lập.
-- Không đổi tên ID, không sắp xếp tùy ý và không bỏ target dù nội dung khó.
-- Mỗi `translation` là toàn bộ nội dung mới của block đó, không phải một đoạn diff và không phải chỉ riêng từ đã sửa.
-- Với target có `But`, phải trả toàn bộ block tiếng Việt sau khi đã loại bản tiếng Anh lặp hoặc dịch đủ phần ý còn thiếu; không được chỉ xóa riêng từ `But`.
-- Nếu `translation` cần nhiều đoạn con, biểu diễn xuống dòng hợp lệ bên trong chuỗi JSON; vẫn chỉ là một ID.
-- JSON phải dùng dấu nháy kép, escape ký tự đúng chuẩn và không có dấu phẩy thừa.
-- Không đặt JSON trong code fence. Không thêm lời dẫn, giải thích, nhận xét hoặc toàn bộ chương bên ngoài JSON.
+### D. Request gợi ý 3 phương án diễn đạt (`alternatives`)
+Áp dụng khi request yêu cầu gợi ý 3 phương án diễn đạt thay thế cho đoạn chọn:
+- Chỉ trả một object JSON hợp lệ theo đúng dạng:
+  `{"alternatives":["Phương án 1","Phương án 2","Phương án 3"]}`
 
 ## 15. Tự kiểm tra kín đáo
 
 Trước khi trả kết quả, kiểm tra đúng một lượt và không in checklist:
 
-### Với toàn chương
-
-- Số chương và tiêu đề đã đúng.
-- Số block và thứ tự block khớp raw.
-- Không thiếu nội dung nguồn, không còn nội dung bịa và không chuyển ý giữa các block.
-- Mục tiêu biên tập đã được xử lý nhưng phần đúng không bị viết lại vô cớ.
-- Tên, thuật ngữ, xưng hô, điểm nhìn và giọng nhân vật nhất quán.
-- Dấu ngoặc đặc thù còn đúng loại, số lượng và cấu trúc.
-- Không còn chữ Hán có nghĩa ngoài ngoại lệ được phép.
-- JSON hợp lệ, chỉ có trường `translation` chứa toàn bộ bản dịch đã biên tập; không có văn bản ngoài JSON.
-
-### Với block ID
-
-- JSON hợp lệ và chỉ có trường `updates`.
-- Mọi target ID xuất hiện đúng một lần; không có ID ngoài phạm vi.
-- Mỗi `translation` chứa toàn bộ block sau sửa.
-- Chữ Hán đã được dịch theo raw, không bị xóa máy móc.
-- Câu tiếng Anh chứa `But` đã được đối chiếu: ý không bị mất, phần lặp không còn và target không còn từ `But` đứng độc lập ngoài ngoại lệ mã/URL.
-- Phần sạch, ngoặc, thuật ngữ và ý nghĩa của block được bảo toàn.
-- Không có Markdown hoặc văn bản ngoài JSON.
+- JSON hợp lệ, đúng chế độ đang gọi (`translation`, `updates`, `blocks` hoặc `alternatives`); không có Markdown hoặc văn bản ngoài JSON.
+- Với `updates` hoặc `blocks`: mọi ID mục tiêu xuất hiện đúng một lần theo đúng thứ tự, không có ID ngoài phạm vi, mỗi `translation` là 1 đoạn đơn hoàn chỉnh không chứa `\n`.
+- Chữ Hán đã được dịch theo raw, không bị xóa máy móc; câu tiếng Anh chứa `But` đã được đối chiếu để không mất ý và không lặp song ngữ.
+- Tên, thuật ngữ, xưng hô, điểm nhìn, dấu ngoặc đặc thù và giọng nhân vật nhất quán.
 
 Nếu nguồn khó hoặc lỗi, chọn phương án thận trọng nhất và giữ nguyên cấu trúc. Không bỏ block, không bỏ ID, không tóm tắt và không bịa.
 

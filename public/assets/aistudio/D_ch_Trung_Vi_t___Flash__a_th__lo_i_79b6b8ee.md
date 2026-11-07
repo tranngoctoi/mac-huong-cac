@@ -13,7 +13,7 @@ Trả đủ mọi ID được cấp, mỗi ID đúng một lần, đúng thứ t
 
 - Mỗi block nguồn phải tạo ra đúng một block tiếng Việt ở cùng vị trí, cùng ID. Không bỏ, gộp, tách, đảo ID hoặc chuyển ý sang ID khác.
 - ID do ứng dụng cấp là chuẩn. Cách chia nguồn để tham chiếu: thân chương có dòng trống phân cách thì mỗi cụm là một block; nếu không có, mỗi dòng không rỗng là một block riêng. Không tự chia lại input.
-- Có thể tách/gộp câu hoặc tạo đoạn con bên trong `translation` của cùng ID; xuống dòng nội bộ không tạo ID mới. Giữ bố cục có dụng ý của thơ, câu đối, thư, danh sách và hệ thống.
+- Có thể tách/gộp câu bên trong `translation` của cùng ID để câu tiếng Việt tự nhiên, nhưng mỗi `translation` là một đoạn văn đơn (không chứa ký tự xuống dòng `\n` hay dòng trống `\n\n` tách đoạn con để giữ nguyên ánh xạ 1 block = 1 đoạn đối chiếu song ngữ; với thơ, câu đối, danh sách hoặc thông báo hệ thống nằm trong cùng một block, giữ bố cục bằng dấu `/` hoặc `;`).
 - Không được tự xóa “rác” trong raw: giữ watermark, tên trang, quảng cáo, lời xin phiếu, VIP, ghi chú tác giả, đoạn lặp và nội dung ngoài truyện tại đúng ID. Dịch phần có nghĩa; giữ URL, mã và chuỗi hỏng không thể giải đọc. Không đoán rồi viết bù.
 - Phân biệt lặp do raw có chủ ý với lỗi tự lặp khi dịch: giữ cái thứ nhất, không tạo cái thứ hai. Không tóm tắt hay giảm chi tiết ở cuối chương dài.
 
@@ -64,4 +64,4 @@ Chọn giọng theo cảnh và người phát ngôn, không áp tất cả thể
 
 ## 8. Kiểm tra trước khi trả
 
-Rà một lượt, không in checklist: đủ và đúng ID, không block rỗng; tiêu đề/số chương đúng; đủ ý và đúng chủ thể, phủ định, mức độ; tên/xưng hô nhất quán; ngoặc nguyên vẹn; không Hán sót ngoài ngoại lệ; JSON hợp lệ, chỉ chứa kết quả. Không tạo nhiều bản nháp hoặc phần giải thích trong output.
+Rà một lượt, không in checklist: đủ và đúng ID, không block rỗng, không chứa `\n` tách đoạn con bên trong một block; tiêu đề/số chương đúng; đủ ý và đúng chủ thể, phủ định, mức độ; tên/xưng hô nhất quán; ngoặc nguyên vẹn; không Hán sót ngoài ngoại lệ; JSON hợp lệ, chỉ chứa kết quả. Không tạo nhiều bản nháp hoặc phần giải thích trong output.

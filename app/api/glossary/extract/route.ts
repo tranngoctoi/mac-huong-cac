@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  buildGlossaryExtractResponseFormat,
   buildInteractionGenerationConfig,
   createWire1HeartbeatStream,
   extractInteractionText,
   geminiKeyPool,
-  normalizeThinkingLevel,
   parseTriedKeysHeader,
+  resolveThinkingLevelForModel,
   safeParseInteractionJson,
 } from '@/lib/gemini-server';
 import {
@@ -24,7 +25,7 @@ export async function POST(req: NextRequest) {
   const routeStartMs = Date.now();
   let selectedModel = 'gemini-flash-latest';
   let cleanFallbackModel: string | undefined;
-  let resolvedThinkingLevel = normalizeThinkingLevel('high');
+  let resolvedThinkingLevel = resolveThinkingLevelForModel('high', selectedModel);
   let textToScanLength = 0;
   let existingTermsCount = 0;
 
@@ -58,7 +59,14 @@ export async function POST(req: NextRequest) {
   const textToScan = (rawContent || sampleText || '').trim();
   textToScanLength = textToScan.length;
   existingTermsCount = Array.isArray(existingTerms) ? existingTerms.length : 0;
-  resolvedThinkingLevel = normalizeThinkingLevel(thinkingLevel);
+  selectedModel =
+    typeof model === 'string' && model.trim()
+      ? model.trim()
+      : 'gemini-flash-latest';
+  resolvedThinkingLevel = resolveThinkingLevelForModel(
+    thinkingLevel,
+    selectedModel
+  );
 
   if (!textToScan) {
     logger.warn(
@@ -75,11 +83,6 @@ export async function POST(req: NextRequest) {
 
   return createWire1HeartbeatStream(async () => {
     try {
-      selectedModel =
-        typeof model === 'string' && model.trim()
-          ? model.trim()
-          : 'gemini-flash-latest';
-
       cleanFallbackModel =
         typeof fallbackModel === 'string' && fallbackModel.trim()
           ? fallbackModel.trim()
@@ -129,6 +132,8 @@ QUY TẮC TRÍCH XUẤT CHUẨN:
 [VĂN BẢN TIẾNG TRUNG CẦN QUÉT]:
 ${slicedInput}`;
 
+      const responseFormatSchema = buildGlossaryExtractResponseFormat(120);
+
       const {
         result: interaction,
         keyIndexUsed,
@@ -145,74 +150,11 @@ ${slicedInput}`;
             system_instruction: systemPrompt,
             input: prompt,
             generation_config: buildInteractionGenerationConfig(
-              resolvedThinkingLevel,
-              { temperature: 0.2 }
+              thinkingLevel,
+              undefined,
+              slotInfo.activeModel
             ),
-            response_format: {
-              type: 'object',
-              properties: {
-                terms: {
-                  type: 'array',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      sourceTerm: {
-                        type: 'string',
-                        description: 'Từ gốc tiếng Trung chính tắc (chữ Hán).',
-                      },
-                      targetTerm: {
-                        type: 'string',
-                        description: 'Bản dịch Hán Việt / Tiếng Việt chuẩn cố định.',
-                      },
-                      aliases: {
-                        type: 'array',
-                        items: { type: 'string' },
-                        description:
-                          'Danh sách các cách viết tiếng Trung khác / biệt danh / đạo hiệu của cùng thực thể này (nếu có, nếu không trả về mảng rỗng []).',
-                      },
-                      policy: {
-                        type: 'string',
-                        enum: ['force', 'prefer', 'contextual', 'keep_source'],
-                        description:
-                          'Chính sách dịch: force (cố định) | prefer (ưu tiên) | contextual (tùy ngữ cảnh) | keep_source (giữ nguyên).',
-                      },
-                      category: {
-                        type: 'string',
-                        enum: [
-                          'character',
-                          'location',
-                          'cultivation',
-                          'skill',
-                          'organization',
-                          'item',
-                          'title',
-                          'pronoun',
-                          'other',
-                        ],
-                        description:
-                          'Phân loại: character | location | cultivation | skill | organization | item | title | pronoun | other',
-                      },
-                      notes: {
-                        type: 'string',
-                        description:
-                          'Ghi chú ngắn gọn về vai trò, giới tính, quan hệ và quy tắc xưng hô.',
-                      },
-                    },
-                    required: [
-                      'sourceTerm',
-                      'targetTerm',
-                      'aliases',
-                      'policy',
-                      'category',
-                      'notes',
-                    ],
-                    additionalProperties: false,
-                  },
-                },
-              },
-              required: ['terms'],
-              additionalProperties: false,
-            },
+            response_format: responseFormatSchema,
           });
         },
         selectedModel,
@@ -226,7 +168,13 @@ ${slicedInput}`;
         }
       );
 
-      const rawOutputText = extractInteractionText(interaction);
+      resolvedThinkingLevel = resolveThinkingLevelForModel(
+        thinkingLevel,
+        modelUsed
+      );
+
+      const contextLabel = `GlossaryExtract[${reqId}]`;
+      const rawOutputText = extractInteractionText(interaction, contextLabel);
       const parsed = safeParseInteractionJson<{
         terms?: Array<{
           sourceTerm: string;
@@ -236,9 +184,22 @@ ${slicedInput}`;
           category: string;
           notes: string;
         }>;
-      }>(rawOutputText, `GlossaryExtract[${reqId}]`);
+      }>(rawOutputText, contextLabel);
 
-      const terms = parsed.terms || [];
+      if (!Array.isArray(parsed.terms)) {
+        throw new Error(
+          '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng thiếu mảng "terms" hợp lệ.'
+        );
+      }
+
+      const terms = parsed.terms.filter(
+        (t) =>
+          t &&
+          typeof t.sourceTerm === 'string' &&
+          t.sourceTerm.trim().length > 0 &&
+          typeof t.targetTerm === 'string' &&
+          t.targetTerm.trim().length > 0
+      );
       const routeDurationMs = Date.now() - routeStartMs;
 
       const debugTrace: ServerDebugTrace = {

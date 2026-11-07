@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  buildBlocksResponseFormat,
   buildInteractionGenerationConfig,
   createWire1HeartbeatStream,
   extractInteractionText,
   geminiKeyPool,
-  normalizeThinkingLevel,
   parseTriedKeysHeader,
+  resolveThinkingLevelForModel,
   safeParseInteractionJson,
 } from '@/lib/gemini-server';
 import {
@@ -43,7 +44,7 @@ export async function POST(req: NextRequest) {
   const routeStartMs = Date.now();
   let selectedModel = 'gemini-flash-latest';
   let cleanFallbackModel: string | undefined;
-  let resolvedThinkingLevel = normalizeThinkingLevel('high');
+  let resolvedThinkingLevel = resolveThinkingLevelForModel('high', selectedModel);
   let chapterNumForTrace = 1;
   let expectedBlocksCount = 0;
   let rawCharCount = 0;
@@ -83,7 +84,14 @@ export async function POST(req: NextRequest) {
 
   chapterNumForTrace = chapterNumber;
   rawCharCount = rawContent.length;
-  resolvedThinkingLevel = normalizeThinkingLevel(thinkingLevel);
+  selectedModel =
+    typeof model === 'string' && model.trim()
+      ? model.trim()
+      : 'gemini-flash-latest';
+  resolvedThinkingLevel = resolveThinkingLevelForModel(
+    thinkingLevel,
+    selectedModel
+  );
 
   if (!rawContent || !rawContent.trim()) {
     logger.warn(
@@ -100,11 +108,6 @@ export async function POST(req: NextRequest) {
 
   return createWire1HeartbeatStream(async () => {
     try {
-      selectedModel =
-        typeof model === 'string' && model.trim()
-          ? model.trim()
-          : 'gemini-flash-latest';
-
       cleanFallbackModel =
         typeof fallbackModel === 'string' && fallbackModel.trim()
           ? fallbackModel.trim()
@@ -168,14 +171,7 @@ export async function POST(req: NextRequest) {
         2
       );
 
-      const idPropertySchema: Record<string, unknown> = {
-        type: 'string',
-        description:
-          'Mã định danh block nguyên gốc (TITLE, P0001, P0002...). Phải khớp 1:1 với input.',
-      };
-      if (expectedBlockIds.length <= 64) {
-        idPropertySchema.enum = expectedBlockIds;
-      }
+      const responseFormatSchema = buildBlocksResponseFormat(expectedBlockIds);
 
       const {
         result: interaction,
@@ -192,34 +188,11 @@ export async function POST(req: NextRequest) {
             system_instruction: fullSystemPrompt,
             input: wireInputJson,
             generation_config: buildInteractionGenerationConfig(
-              resolvedThinkingLevel,
-              { temperature: 0.3 }
+              thinkingLevel,
+              undefined,
+              slotInfo.activeModel
             ),
-            response_format: {
-              type: 'object',
-              properties: {
-                blocks: {
-                  type: 'array',
-                  description:
-                    'Danh sách đầy đủ các block đã dịch theo đúng thứ tự nguyên văn, bắt đầu bằng TITLE rồi đến P0001, P0002...',
-                  items: {
-                    type: 'object',
-                    properties: {
-                      id: idPropertySchema,
-                      translation: {
-                        type: 'string',
-                        description:
-                          'Bản dịch tiếng Việt mượt mà của block này (1 đoạn duy nhất, không chứa ký tự xuống dòng).',
-                      },
-                    },
-                    required: ['id', 'translation'],
-                    additionalProperties: false,
-                  },
-                },
-              },
-              required: ['blocks'],
-              additionalProperties: false,
-            },
+            response_format: responseFormatSchema,
           });
         },
         selectedModel,
@@ -233,17 +206,78 @@ export async function POST(req: NextRequest) {
         }
       );
 
-      const rawText = extractInteractionText(interaction).trim();
+      resolvedThinkingLevel = resolveThinkingLevelForModel(
+        thinkingLevel,
+        modelUsed
+      );
+
+      const contextLabel = `TranslateChapter#${chapterNumber}[${reqId}]`;
+      const rawText = extractInteractionText(interaction, contextLabel).trim();
       const parsed = safeParseInteractionJson<{
         blocks?: Array<{ id: string; translation: string }>;
-      }>(rawText, `TranslateChapter#${chapterNumber}[${reqId}]`);
+      }>(rawText, contextLabel);
 
-      const returnedBlocks = Array.isArray(parsed.blocks) ? parsed.blocks : [];
+      if (!Array.isArray(parsed.blocks) || parsed.blocks.length === 0) {
+        logger.error(
+          'TRANSLATE',
+          `✖ [${contextLabel}] Structured Output không chứa mảng "blocks" hợp lệ hoặc mảng rỗng.`,
+          { reqId, chapterNumber, rawPreview: rawText.slice(0, 500) },
+          reqId
+        );
+        throw new Error(
+          '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng mảng "blocks" đang rỗng hoặc sai cấu trúc.'
+        );
+      }
+
+      const returnedBlocks = parsed.blocks;
       const materialized = materializeBlocksToChapter(
         returnedBlocks,
         rawBlocks,
         chapterNumber
       );
+
+      const expectedBodyCount = Math.max(0, rawBlocks.length - 1);
+      if (
+        expectedBodyCount > 0 &&
+        materialized.alignment.translatedBlockCount === 0
+      ) {
+        logger.error(
+          'TRANSLATE',
+          `✖ [${contextLabel}] Tất cả ${expectedBodyCount} đoạn thân chương đều bị trống sau khi đối chiếu Block ID.`,
+          {
+            reqId,
+            chapterNumber,
+            missingIds: materialized.missingIds,
+            emptyIds: materialized.emptyIds,
+            unexpectedIds: materialized.unexpectedIds,
+          },
+          reqId
+        );
+        throw new Error(
+          `[INVALID_STRUCTURED_OUTPUT] Không có đoạn thân chương nào hợp lệ khớp với mã ID nguyên tác (thiếu ${materialized.missingIds.length} ID, rỗng ${materialized.emptyIds.length} ID).`
+        );
+      }
+
+      if (
+        materialized.missingIds.length > 0 ||
+        materialized.duplicateIds.length > 0 ||
+        materialized.emptyIds.length > 0 ||
+        materialized.unexpectedIds.length > 0
+      ) {
+        logger.warn(
+          'TRANSLATE',
+          `⚠️ [${contextLabel}] Phát hiện sai lệch cục bộ trên Structured Output Chương #${chapterNumber} (đã bảo toàn vị trí slot 1:1): thiếu=${materialized.missingIds.length}, rỗng=${materialized.emptyIds.length}, trùng=${materialized.duplicateIds.length}, ID lạ=${materialized.unexpectedIds.length}`,
+          {
+            reqId,
+            chapterNumber,
+            missingIds: materialized.missingIds.slice(0, 20),
+            emptyIds: materialized.emptyIds.slice(0, 20),
+            duplicateIds: materialized.duplicateIds.slice(0, 20),
+            unexpectedIds: materialized.unexpectedIds.slice(0, 20),
+          },
+          reqId
+        );
+      }
 
       const routeDurationMs = Date.now() - routeStartMs;
       const debugTrace: ServerDebugTrace = {
@@ -269,13 +303,18 @@ export async function POST(req: NextRequest) {
         outputSummary: {
           returnedBlocksCount: returnedBlocks.length,
           translatedCharCount: materialized.translatedContent.length,
+          isAligned: materialized.alignment.isAligned,
+          missingIdsCount: materialized.missingIds.length,
+          duplicateIdsCount: materialized.duplicateIds.length,
+          emptyIdsCount: materialized.emptyIds.length,
+          unexpectedIdsCount: materialized.unexpectedIds.length,
         },
         attempts,
       };
 
       logger.info(
         'TRANSLATE',
-        `✔ Hoàn tất dịch Chương #${chapterNumber} qua ${modelUsed} (thinking=${resolvedThinkingLevel}, Key #${keyIndexUsed}/${totalKeys}) — ${returnedBlocks.length}/${rawBlocks.length} blocks trong ${(routeDurationMs / 1000).toFixed(2)}s`,
+        `✔ Hoàn tất dịch Chương #${chapterNumber} qua ${modelUsed} (thinking=${resolvedThinkingLevel}, Key #${keyIndexUsed}/${totalKeys}) — ${materialized.alignment.translatedBlockCount}/${expectedBodyCount} đoạn thân (aligned=${materialized.alignment.isAligned}) trong ${(routeDurationMs / 1000).toFixed(2)}s`,
         {
           reqId,
           chapterNumber,
@@ -284,6 +323,7 @@ export async function POST(req: NextRequest) {
           keyIndexUsed,
           returnedBlocksCount: returnedBlocks.length,
           expectedBlocksCount: rawBlocks.length,
+          isAligned: materialized.alignment.isAligned,
           routeDurationMs,
         },
         reqId,
@@ -296,6 +336,10 @@ export async function POST(req: NextRequest) {
           titleTranslated: normalizeVietnameseText(materialized.titleTranslated),
           translatedContent: normalizeVietnameseText(materialized.translatedContent),
           alignment: materialized.alignment,
+          missingIds: materialized.missingIds,
+          duplicateIds: materialized.duplicateIds,
+          emptyIds: materialized.emptyIds,
+          unexpectedIds: materialized.unexpectedIds,
           modelUsed,
           thinkingLevelUsed: resolvedThinkingLevel,
           didFallback,

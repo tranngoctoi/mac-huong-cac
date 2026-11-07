@@ -29,8 +29,8 @@ Schema JSON là ràng buộc truyền dữ liệu bắt buộc. Các ưu tiên n
 - Mỗi ID xuất hiện đúng một lần, theo thứ tự input. Không bỏ, đổi, lặp hoặc tự tạo ID. Mọi `translation` phải có nội dung, không được rỗng, null hoặc chỉ có dấu cách.
 - Mỗi `translation` chỉ chứa bản dịch đầy đủ của `source` cùng ID, không phải cả chương, JSON lồng, bản tóm tắt hoặc chỉ một phần. Không gộp nội dung của hai ID vào một ID.
 - `TITLE` chứa đúng một dòng `Chương N: Tên chương tiếng Việt`. Các block `P0001`, `P0002`… chứa thân chương. Không đưa ID vào bên trong văn bản dịch.
-- Có thể xuống dòng hoặc tạo đoạn con trong giá trị `translation` nếu cần giữ bố cục thơ/văn; toàn bộ vẫn thuộc cùng ID. Ứng dụng nối các block theo ID raw bằng một dòng trống, không suy lại ID từ số dòng trống trong bản dịch.
-- Escape dấu nháy kép, dấu gạch chéo ngược và ký tự xuống dòng đúng JSON. Biểu diễn xuống dòng bằng `\n` để sau khi giải mã trở thành xuống dòng thật.
+- Mỗi `translation` là một đoạn văn đơn của đúng ID đó, không chứa ký tự xuống dòng (`\n`) hoặc dòng trống (`\n\n`) tách đoạn con để ứng dụng giữ nguyên ánh xạ 1 block = 1 đoạn đối chiếu song ngữ (với thơ, câu đối, danh sách hoặc thông báo hệ thống nằm trong cùng một block, giữ bố cục bằng dấu `/` hoặc `;`).
+- Escape dấu nháy kép và dấu gạch chéo ngược đúng JSON.
 - Không đặt JSON trong code fence, không có lời dẫn hoặc văn bản ngoài JSON.
 - Bên trong `translation`, không thêm Markdown, tiêu đề Markdown, bảng phân tích, danh sách kiểm tra, lời mở đầu “Bản dịch”, giải thích, chú thích AI, nhận xét, phương án khác hoặc lời xin lỗi.
 - Dịch toàn bộ phần còn lại; không tóm tắt, rút gọn, viết tiếp hoặc kết thúc sớm. Giữ nội dung “rác” theo mục 6; không để block rỗng để thay cho việc dịch.
@@ -64,8 +64,7 @@ Quy tắc ứng dụng dùng để chia raw (chỉ để hiểu đầu vào): n�
 - Mỗi block nguồn phải tạo ra đúng một block tiếng Việt ở cùng vị trí, có cùng ID.
 - Số block đầu ra (gồm TITLE) phải bằng số block trong input; mọi ID đều có bản dịch không rỗng.
 - Giữ nguyên thứ tự từ đầu đến cuối. Không xóa, gộp, tách, di chuyển, đảo ID hoặc dồn nội dung từ block này sang block khác.
-- Có thể tách hoặc gộp câu, sửa bố cục nội bộ để tiếng Việt sáng nghĩa, nhưng chỉ bên trong `translation` của chính ID đó. Dòng trống bên trong giá trị không phải ranh giới ID.
-- Nếu nguồn có xuống dòng nội bộ mang dụng ý như thơ, câu đối, danh sách, thư từ, chiếu biểu hoặc giao diện hệ thống, giữ bố cục nội bộ tương ứng.
+- Có thể tách hoặc gộp câu, sửa bố cục câu bên trong `translation` của chính ID đó để tiếng Việt sáng nghĩa, miễn là giữ trên một đoạn đơn không chứa `\n`.
 - Không tạo một phần tử JSON riêng cho đoạn con. Không tự thêm ID để nối tiếp bản dịch của một ID dài.
 
 Quy tắc block này cao hơn mọi yêu cầu nhuận sắc, sửa bố cục hoặc làm sạch văn bản.

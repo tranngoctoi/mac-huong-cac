@@ -394,14 +394,16 @@ export default function MacHuongCacStudioPage() {
   const [activeFindMatchIndex, setActiveFindMatchIndex] = useState(0);
   const [aiAssistLoading, setAiAssistLoading] = useState(false);
   const [aiAlternatives, setAiAlternatives] = useState<string[]>([]);
+  const [aiAlternativesBlockId, setAiAlternativesBlockId] = useState<string | null>(null);
   const [customAiPrompt, setCustomAiPrompt] = useState('');
-  const [showCustomAiInput, setShowCustomAiInput] = useState(false);
+  const [customAiInputBlockId, setCustomAiInputBlockId] = useState<string | null>(null);
   const [editorStatusToast, setEditorStatusToast] = useState<string | null>(null);
   const [isEditorToolbarExpanded, setIsEditorToolbarExpanded] = useState(true);
 
   // Interactive 1:1 Block-ID Table State
   const [bilingualFilterMode, setBilingualFilterMode] = useState<'all' | 'dirty'>('all');
   const [singleBlockLoadingId, setSingleBlockLoadingId] = useState<string | null>(null);
+  const [singleBlockLoadingAction, setSingleBlockLoadingAction] = useState<string | null>(null);
   const [activeFocusedBlockId, setActiveFocusedBlockId] = useState<string>('TITLE');
   const [isEditingRawBlocks, setIsEditingRawBlocks] = useState(false);
   const blockTextareaRefs = useRef<Record<string, HTMLTextAreaElement | null>>({});
@@ -418,7 +420,6 @@ export default function MacHuongCacStudioPage() {
   // Automatically scroll Editor & Reader viewports to top whenever activeChapterId changes
   useEffect(() => {
     if (!activeChapterId) return;
-    setActiveFocusedBlockId('TITLE');
     if (editorScrollContainerRef.current) {
       editorScrollContainerRef.current.scrollTop = 0;
     }
@@ -426,6 +427,7 @@ export default function MacHuongCacStudioPage() {
       readerScrollContainerRef.current.scrollTop = 0;
     }
     const rafId = window.requestAnimationFrame(() => {
+      setActiveFocusedBlockId('TITLE');
       if (editorScrollContainerRef.current) {
         editorScrollContainerRef.current.scrollTop = 0;
       }
@@ -610,29 +612,36 @@ export default function MacHuongCacStudioPage() {
   useEffect(() => {
     if (currentChapterSyncKey === syncedChapterKeyRef.current) return;
     syncedChapterKeyRef.current = currentChapterSyncKey;
-    if (!activeChapter) {
-      setEditorTitle('');
-      setEditorContent('');
-      setHistoryStack([]);
-      setHistoryPointer(-1);
-      setAiAlternatives([]);
-    } else {
-      const initTitle = normalizeVietnameseText(activeChapter.titleTranslated || '');
-      const initContent = normalizeVietnameseText(
-        activeChapter.translatedContent || ''
-      );
-      setEditorTitle(initTitle);
-      setEditorContent(initContent);
-      const initialSnap: EditorHistorySnapshot = {
-        titleTranslated: initTitle,
-        translatedContent: initContent,
-        timestamp: activeChapter.updatedAt,
-        label: 'Khởi tạo chương',
-      };
-      setHistoryStack([initialSnap]);
-      setHistoryPointer(0);
-      setAiAlternatives([]);
-    }
+    const chapterSnap = activeChapter;
+    queueMicrotask(() => {
+      if (!chapterSnap) {
+        setEditorTitle('');
+        setEditorContent('');
+        setHistoryStack([]);
+        setHistoryPointer(-1);
+        setAiAlternatives([]);
+        setAiAlternativesBlockId(null);
+        setCustomAiInputBlockId(null);
+      } else {
+        const initTitle = normalizeVietnameseText(chapterSnap.titleTranslated || '');
+        const initContent = normalizeVietnameseText(
+          chapterSnap.translatedContent || ''
+        );
+        setEditorTitle(initTitle);
+        setEditorContent(initContent);
+        const initialSnap: EditorHistorySnapshot = {
+          titleTranslated: initTitle,
+          translatedContent: initContent,
+          timestamp: chapterSnap.updatedAt,
+          label: 'Khởi tạo chương',
+        };
+        setHistoryStack([initialSnap]);
+        setHistoryPointer(0);
+        setAiAlternatives([]);
+        setAiAlternativesBlockId(null);
+        setCustomAiInputBlockId(null);
+      }
+    });
   }, [currentChapterSyncKey, activeChapter]);
 
   const pushEditorSnapshot = useCallback(
@@ -2435,26 +2444,61 @@ export default function MacHuongCacStudioPage() {
     }
   };
 
-  // AI Co-Editor Assist Actions (works on currently focused Block ID or selected text inside it)
+  // Per-Block AI Co-Editor Assist Actions (Chuốt mượt, Sửa xưng hô, 3 Gợi ý, Lệnh AI tùy chỉnh ngay tại từng Block ID)
   const handleRunAiCoEditor = async (
-    action: 'polish' | 'fix_pronouns' | 'fix_qa' | 'alternatives' | 'custom'
+    action: 'polish' | 'fix_pronouns' | 'fix_qa' | 'alternatives' | 'custom',
+    targetPair?: AlignedBlockPair,
+    idxInAllPairs?: number
   ) => {
     if (!activeChapter) return;
-    const { blockId, selected } = getEditorSelection();
     const focusedPair =
-      activeChapterBlockPairs.find((p) => p.id === blockId) ||
+      targetPair ||
+      activeChapterBlockPairs.find((p) => p.id === activeFocusedBlockId) ||
       activeChapterBlockPairs.find((p) => p.id === 'P0001');
+    if (!focusedPair) return;
+
+    setActiveFocusedBlockId(focusedPair.id);
+
+    const el = blockTextareaRefs.current[focusedPair.id];
+    const currentBlockText =
+      focusedPair.id === 'TITLE' ? editorTitle : focusedPair.translation || '';
+    const selStart = el ? el.selectionStart : 0;
+    const selEnd = el ? el.selectionEnd : 0;
+    const selectedSubstring =
+      el && selEnd > selStart ? currentBlockText.slice(selStart, selEnd).trim() : '';
+
     const targetText =
-      selected.trim() ||
-      focusedPair?.translation.trim() ||
-      editorContent.trim();
+      selectedSubstring ||
+      currentBlockText.trim() ||
+      focusedPair.source.trim();
     if (!targetText) {
-      showToast('Chưa có văn bản tiếng Việt để biên tập AI.');
+      showToast(`Block ${focusedPair.id} đang trống, chưa có nội dung để xử lý.`);
       return;
     }
 
-    setAiAssistLoading(true);
-    setAiAlternatives([]);
+    const pairIndex =
+      typeof idxInAllPairs === 'number'
+        ? idxInAllPairs
+        : activeChapterBlockPairs.findIndex((p) => p.id === focusedPair.id);
+    const prevBlockText =
+      pairIndex > 0 ? activeChapterBlockPairs[pairIndex - 1]?.translation : '';
+    const nextBlockText =
+      pairIndex >= 0 && pairIndex < activeChapterBlockPairs.length - 1
+        ? activeChapterBlockPairs[pairIndex + 1]?.translation
+        : '';
+    const surroundingContext = [
+      prevBlockText ? `[Đoạn trước]: ${prevBlockText}` : '',
+      nextBlockText ? `[Đoạn sau]: ${nextBlockText}` : '',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    setSingleBlockLoadingId(focusedPair.id);
+    setSingleBlockLoadingAction(action);
+    if (action === 'alternatives') {
+      setAiAlternatives([]);
+      setAiAlternativesBlockId(focusedPair.id);
+    }
     try {
       const res = await safeFetchJson<{
         resultText?: string;
@@ -2468,46 +2512,65 @@ export default function MacHuongCacStudioPage() {
           body: JSON.stringify({
             action,
             selectedText: targetText,
-            rawReference: focusedPair?.source || activeChapter.rawContent.slice(0, 6000),
+            rawReference:
+              focusedPair.source || activeChapter.rawContent.slice(0, 4000),
+            surroundingContext,
             customPrompt: customAiPrompt,
             systemInstruction: activeEditorialProfile.systemInstruction,
             pronounRule: activeEditorialProfile.pronounRule,
             includeGlossary: shouldSendGlossary,
             glossary: enabledGlossaryItems,
+            chapterNumber: activeChapter.chapterNumber,
             model: modelConfig.selectedModel,
+            fallbackModel: effectiveFallbackModel,
             thinkingLevel:
               modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL,
           }),
         },
         {
           scope: 'AI_EDITOR',
-          label: `AI Co-Editor (${action} • ${focusedPair?.id || 'Chapter'})`,
+          label: `AI Block (${action} • ${focusedPair.id})`,
         }
       );
       const data = res.data || {};
       if (!res.ok || !res.data) {
         throw new Error(
-          data.error || res.errorMessage || 'Lỗi khi gọi AI Biên Tập'
+          data.error || res.errorMessage || 'Lỗi khi gọi AI Biên Tập Block'
         );
       }
 
       if (action === 'alternatives' && Array.isArray(data.alternatives)) {
         setAiAlternatives(data.alternatives);
-      } else if (data.resultText && focusedPair) {
+        setAiAlternativesBlockId(focusedPair.id);
+      } else if (data.resultText) {
         const cleanedResult = normalizeVietnameseText(data.resultText)
           .replace(/\r?\n+/g, ' ')
           .trim();
-        if (selected.trim()) {
-          replaceEditorSelection(cleanedResult, `AI Biên tập (${action})`);
+        if (selectedSubstring && el && selEnd > selStart) {
+          const nextBlockValue =
+            currentBlockText.slice(0, selStart) +
+            cleanedResult +
+            currentBlockText.slice(selEnd);
+          handleUpdateSingleBlockText(focusedPair, nextBlockValue);
         } else {
           handleUpdateSingleBlockText(focusedPair, cleanedResult);
         }
-        showToast(`AI đã biên tập ${focusedPair.id}!`);
+        if (action === 'custom') {
+          setCustomAiInputBlockId(null);
+        }
+        showToast(
+          action === 'polish'
+            ? `Đã chuốt mượt ${focusedPair.id}!`
+            : action === 'fix_pronouns'
+              ? `Đã đồng bộ xưng hô ${focusedPair.id}!`
+              : `Đã thực thi lệnh AI trên ${focusedPair.id}!`
+        );
       }
     } catch (err) {
-      showToast(`Lỗi AI Biên Tập: ${(err as Error).message}`);
+      showToast(`Lỗi AI Block ${focusedPair.id}: ${(err as Error).message}`);
     } finally {
-      setAiAssistLoading(false);
+      setSingleBlockLoadingId(null);
+      setSingleBlockLoadingAction(null);
     }
   };
 
@@ -2954,6 +3017,7 @@ export default function MacHuongCacStudioPage() {
       return;
     }
     setSingleBlockLoadingId(pair.id);
+    setSingleBlockLoadingAction('retranslate');
     try {
       const prev =
         idxInAllPairs > 0 ? activeChapterBlockPairs[idxInAllPairs - 1]?.translation : undefined;
@@ -2985,6 +3049,7 @@ export default function MacHuongCacStudioPage() {
             includeGlossary: shouldSendGlossary,
             glossary: enabledGlossaryItems,
             model: modelConfig.selectedModel,
+            fallbackModel: effectiveFallbackModel,
             thinkingLevel:
               modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL,
           }),
@@ -3024,6 +3089,7 @@ export default function MacHuongCacStudioPage() {
       showToast(`Lỗi AI Block ${pair.id}: ${(err as Error).message}`);
     } finally {
       setSingleBlockLoadingId(null);
+      setSingleBlockLoadingAction(null);
     }
   };
 
@@ -4400,43 +4466,13 @@ export default function MacHuongCacStudioPage() {
                             </button>
                           </div>
 
-                          {/* Right of Row 1: AI Assist on Focused Block + Filter All/Dirty */}
+                          {/* Right of Row 1: Focused Block Indicator + Filter All/Dirty */}
                           <div className="flex flex-wrap items-center gap-1.5">
                             <span className="rounded bg-[#8C2D19]/12 px-2 py-0.5 font-mono text-[11px] font-bold text-[#8C2D19]">
                               Đang chọn: {activeFocusedBlockId}
                             </span>
-                            <button
-                              onClick={() => handleRunAiCoEditor('polish')}
-                              disabled={aiAssistLoading}
-                              className="rounded-lg border border-[#D8CEB8] bg-white px-2 py-1 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6]"
-                              title={`Nhờ AI chuốt mượt ${activeFocusedBlockId}`}
-                            >
-                              Chuốt mượt
-                            </button>
-                            <button
-                              onClick={() => handleRunAiCoEditor('fix_pronouns')}
-                              disabled={aiAssistLoading}
-                              className="rounded-lg border border-[#D8CEB8] bg-white px-2 py-1 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6]"
-                              title={`Đồng bộ đại từ xưng hô cho ${activeFocusedBlockId}`}
-                            >
-                              Sửa xưng hô
-                            </button>
-                            <button
-                              onClick={() => handleRunAiCoEditor('alternatives')}
-                              disabled={aiAssistLoading}
-                              className="rounded-lg border border-[#D8CEB8] bg-white px-2 py-1 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6]"
-                              title={`Gợi ý 3 phương án diễn đạt khác cho ${activeFocusedBlockId}`}
-                            >
-                              3 Gợi ý
-                            </button>
-                            <button
-                              onClick={() => setShowCustomAiInput(!showCustomAiInput)}
-                              className="rounded-lg border border-[#D8CEB8] bg-white px-2 py-1 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6]"
-                            >
-                              Lệnh AI...
-                            </button>
 
-                             {/* Filter All vs Dirty Blocks */}
+                            {/* Filter All vs Dirty Blocks */}
                             <div className="flex items-center rounded-lg border border-[#D8CEB8] bg-white p-0.5">
                               <button
                                 onClick={() => setBilingualFilterMode('all')}
@@ -4678,74 +4714,6 @@ export default function MacHuongCacStudioPage() {
                               </div>
                             </div>
                           </>
-                        )}
-
-                        {/* Optional Custom AI Command Bar */}
-                        {showCustomAiInput && (
-                          <div className="flex items-center gap-2 border-t border-[#E5DEC9] pt-2 text-xs">
-                            <span className="font-semibold text-[#8C2D19]">
-                              Lệnh AI cho {activeFocusedBlockId}:
-                            </span>
-                            <input
-                              type="text"
-                              placeholder="VD: Chuyển đoạn này sang giọng văn cổ phong bi tráng hơn, đổi xưng hô thành Bản tọa - Ngươi..."
-                              value={customAiPrompt}
-                              onChange={(e) => setCustomAiPrompt(e.target.value)}
-                              className="flex-1 rounded-lg border border-[#D8CEB8] bg-white px-3 py-1 text-xs"
-                            />
-                            <button
-                              onClick={() => handleRunAiCoEditor('custom')}
-                              disabled={aiAssistLoading || !customAiPrompt.trim()}
-                              className="rounded-lg bg-[#8C2D19] px-3 py-1 text-xs font-semibold text-white disabled:opacity-40"
-                            >
-                              Thực thi AI
-                            </button>
-                          </div>
-                        )}
-
-                        {/* Optional 3 AI Alternatives Picker */}
-                        {aiAlternatives.length > 0 && (
-                          <div className="space-y-2 border-t border-[#E5DEC9] pt-2.5">
-                            <div className="flex items-center justify-between">
-                              <span className="text-xs font-bold text-[#8C2D19]">
-                                3 Phương Án Diễn Đạt Từ AI cho {activeFocusedBlockId} (Bấm để áp dụng):
-                              </span>
-                              <button
-                                onClick={() => setAiAlternatives([])}
-                                className="text-xs text-[#605A52] hover:text-[#1C1917]"
-                              >
-                                Đóng
-                              </button>
-                            </div>
-                            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-                              {aiAlternatives.map((alt, i) => (
-                                <div
-                                  key={i}
-                                  onClick={() => {
-                                    const targetPair = activeChapterBlockPairs.find(
-                                      (p) => p.id === activeFocusedBlockId
-                                    );
-                                    const { selected } = getEditorSelection();
-                                    if (selected.trim()) {
-                                      replaceEditorSelection(
-                                        alt,
-                                        `Phương án AI #${i + 1}`
-                                      );
-                                    } else if (targetPair) {
-                                      handleUpdateSingleBlockText(targetPair, alt);
-                                    }
-                                    setAiAlternatives([]);
-                                  }}
-                                  className="cursor-pointer rounded-lg border border-[#C9B99A] bg-white p-2.5 text-xs leading-relaxed text-[#1C1917] hover:border-[#8C2D19] hover:bg-[#FBF8F1]"
-                                >
-                                  <div className="mb-1 font-bold text-[#8C2D19]">
-                                    Phương án {i + 1}
-                                  </div>
-                                  <p className="prose-justify">{alt}</p>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
                         )}
                       </div>
                     </div>
@@ -5008,6 +4976,8 @@ export default function MacHuongCacStudioPage() {
                                   className={`mt-1 flex flex-wrap items-center justify-between gap-1.5 text-[11px] transition ${
                                     isDirty ||
                                     isFocused ||
+                                    customAiInputBlockId === pair.id ||
+                                    (aiAlternativesBlockId === pair.id && aiAlternatives.length > 0) ||
                                     !activeChapterBlockAnalysis.isBlockCountMatched
                                       ? 'opacity-100'
                                       : 'opacity-0 group-hover:opacity-100'
@@ -5051,20 +5021,87 @@ export default function MacHuongCacStudioPage() {
                                       onClick={() =>
                                         handleRetranslateSingleBlock(pair, idxInAll)
                                       }
-                                      disabled={isSingleAiBusy || !pair.source.trim()}
+                                      disabled={isSingleAiBusy || aiAssistLoading || !pair.source.trim()}
                                       className="inline-flex items-center gap-1 rounded border border-[#1E6F50]/40 bg-[#1E6F50]/10 px-2 py-0.5 text-[10px] font-bold text-[#1E6F50] hover:bg-[#1E6F50] hover:text-white disabled:opacity-40"
-                                      title="Nhờ AI dịch hoặc chuốt lại riêng duy nhất Block ID này"
+                                      title={`Nhờ AI dịch lại riêng ${pair.id} từ nguyên tác tiếng Trung`}
                                     >
-                                      {isSingleAiBusy ? (
+                                      {isSingleAiBusy && singleBlockLoadingAction === 'retranslate' ? (
                                         <Loader2 className="h-3 w-3 animate-spin" />
                                       ) : (
                                         <Sparkles className="h-3 w-3" />
                                       )}
-                                      {isSingleAiBusy ? 'Đang dịch...' : 'AI Dịch Block'}
+                                      {isSingleAiBusy && singleBlockLoadingAction === 'retranslate'
+                                        ? 'Đang dịch...'
+                                        : 'AI Dịch Block'}
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleRunAiCoEditor('polish', pair, idxInAll)
+                                      }
+                                      disabled={isSingleAiBusy || aiAssistLoading || (!pair.translation.trim() && !pair.source.trim())}
+                                      className="inline-flex items-center gap-1 rounded border border-[#D8CEB8] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[#1C1917] hover:border-[#8C2D19] hover:bg-[#8C2D19]/10 disabled:opacity-40"
+                                      title={`Nhờ AI chuốt mượt câu văn cho ${pair.id}`}
+                                    >
+                                      {isSingleAiBusy && singleBlockLoadingAction === 'polish' && (
+                                        <Loader2 className="h-2.5 w-2.5 animate-spin text-[#8C2D19]" />
+                                      )}
+                                      Chuốt mượt
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleRunAiCoEditor('fix_pronouns', pair, idxInAll)
+                                      }
+                                      disabled={isSingleAiBusy || aiAssistLoading || (!pair.translation.trim() && !pair.source.trim())}
+                                      className="inline-flex items-center gap-1 rounded border border-[#D8CEB8] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[#1C1917] hover:border-[#8C2D19] hover:bg-[#8C2D19]/10 disabled:opacity-40"
+                                      title={`Đồng bộ đại từ xưng hô cho ${pair.id} theo Glossary & ngữ cảnh đoạn kề`}
+                                    >
+                                      {isSingleAiBusy && singleBlockLoadingAction === 'fix_pronouns' && (
+                                        <Loader2 className="h-2.5 w-2.5 animate-spin text-[#8C2D19]" />
+                                      )}
+                                      Sửa xưng hô
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleRunAiCoEditor('alternatives', pair, idxInAll)
+                                      }
+                                      disabled={isSingleAiBusy || aiAssistLoading || (!pair.translation.trim() && !pair.source.trim())}
+                                      className="inline-flex items-center gap-1 rounded border border-[#D8CEB8] bg-white px-1.5 py-0.5 text-[10px] font-semibold text-[#1C1917] hover:border-[#8C2D19] hover:bg-[#8C2D19]/10 disabled:opacity-40"
+                                      title={`Gợi ý 3 phương án diễn đạt khác nhau cho ${pair.id}`}
+                                    >
+                                      {isSingleAiBusy && singleBlockLoadingAction === 'alternatives' && (
+                                        <Loader2 className="h-2.5 w-2.5 animate-spin text-[#8C2D19]" />
+                                      )}
+                                      3 Gợi ý
+                                    </button>
+
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setActiveFocusedBlockId(pair.id);
+                                        setCustomAiInputBlockId(
+                                          customAiInputBlockId === pair.id ? null : pair.id
+                                        );
+                                      }}
+                                      disabled={isSingleAiBusy || aiAssistLoading}
+                                      className={`rounded border px-1.5 py-0.5 text-[10px] font-semibold transition ${
+                                        customAiInputBlockId === pair.id
+                                          ? 'border-[#8C2D19] bg-[#8C2D19] text-white'
+                                          : 'border-[#D8CEB8] bg-white text-[#1C1917] hover:border-[#8C2D19] hover:bg-[#8C2D19]/10'
+                                      }`}
+                                      title={`Nhập lệnh AI tùy chỉnh cho riêng ${pair.id}`}
+                                    >
+                                      Lệnh AI...
                                     </button>
 
                                     {!isTitle && (
                                       <>
+                                        <span className="mx-0.5 text-[#D8CEB8]">|</span>
                                         <button
                                           type="button"
                                           onClick={() =>
@@ -5110,6 +5147,106 @@ export default function MacHuongCacStudioPage() {
                                     )}
                                   </div>
                                 </div>
+
+                                {/* Inline Per-Block Custom AI Command Bar */}
+                                {customAiInputBlockId === pair.id && (
+                                  <div className="mt-2 flex flex-wrap items-center gap-1.5 rounded-lg border border-[#D8CEB8] bg-[#F3EFE6]/90 p-2 text-xs">
+                                    <span className="font-mono text-[11px] font-bold text-[#8C2D19]">
+                                      Lệnh AI ({pair.id}):
+                                    </span>
+                                    <input
+                                      type="text"
+                                      placeholder="VD: Chuyển đoạn này sang giọng cổ phong bi tráng, đổi xưng hô thành Bản tọa - Ngươi..."
+                                      value={customAiPrompt}
+                                      onChange={(e) => setCustomAiPrompt(e.target.value)}
+                                      onKeyDown={(e) => {
+                                        if (e.key === 'Enter' && customAiPrompt.trim()) {
+                                          e.preventDefault();
+                                          handleRunAiCoEditor('custom', pair, idxInAll);
+                                        } else if (e.key === 'Escape') {
+                                          setCustomAiInputBlockId(null);
+                                        }
+                                      }}
+                                      className="min-w-[200px] flex-1 rounded-md border border-[#C9B99A] bg-white px-2.5 py-1 text-xs text-[#1C1917] focus:border-[#8C2D19] focus:outline-hidden"
+                                    />
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleRunAiCoEditor('custom', pair, idxInAll)
+                                      }
+                                      disabled={
+                                        isSingleAiBusy ||
+                                        aiAssistLoading ||
+                                        !customAiPrompt.trim()
+                                      }
+                                      className="inline-flex items-center gap-1 rounded-md bg-[#8C2D19] px-2.5 py-1 text-xs font-semibold text-white hover:bg-[#722312] disabled:opacity-40"
+                                    >
+                                      {isSingleAiBusy && singleBlockLoadingAction === 'custom' && (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      )}
+                                      Thực thi
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setCustomAiInputBlockId(null)}
+                                      className="rounded-md px-2 py-1 text-xs text-[#605A52] hover:bg-[#E5DEC9]/60 hover:text-[#1C1917]"
+                                    >
+                                      Đóng
+                                    </button>
+                                  </div>
+                                )}
+
+                                {/* Inline Per-Block 3 AI Alternatives Picker */}
+                                {aiAlternativesBlockId === pair.id &&
+                                  aiAlternatives.length > 0 && (
+                                    <div className="mt-2 space-y-2 rounded-lg border border-[#C9B99A] bg-[#F3EFE6]/85 p-2.5">
+                                      <div className="flex items-center justify-between">
+                                        <span className="font-mono text-[11px] font-bold text-[#8C2D19]">
+                                          3 Phương Án Diễn Đạt Từ AI cho {pair.id} (Bấm để áp dụng):
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            setAiAlternatives([]);
+                                            setAiAlternativesBlockId(null);
+                                          }}
+                                          className="text-xs font-semibold text-[#605A52] hover:text-[#1C1917]"
+                                        >
+                                          Đóng
+                                        </button>
+                                      </div>
+                                      <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                                        {aiAlternatives.map((alt, i) => (
+                                          <div
+                                            key={i}
+                                            onClick={() => {
+                                              const { selected, blockId } =
+                                                getEditorSelection();
+                                              if (
+                                                blockId === pair.id &&
+                                                selected.trim()
+                                              ) {
+                                                replaceEditorSelection(
+                                                  alt,
+                                                  `Phương án AI #${i + 1} (${pair.id})`
+                                                );
+                                              } else {
+                                                handleUpdateSingleBlockText(pair, alt);
+                                              }
+                                              setAiAlternatives([]);
+                                              setAiAlternativesBlockId(null);
+                                            }}
+                                            className="cursor-pointer rounded-lg border border-[#C9B99A] bg-white p-2 text-xs leading-relaxed text-[#1C1917] transition hover:border-[#8C2D19] hover:bg-[#FFFDF9]"
+                                          >
+                                            <div className="mb-1 font-mono text-[11px] font-bold text-[#8C2D19]">
+                                              Phương án {i + 1}
+                                            </div>
+                                            <p className="prose-justify">{alt}</p>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
 
                                 {/* Visual QA Highlight Strip when residual Chinese or English leak is inside this block */}
                                 {(pair.hasChinese || pair.hasEnglishLeak) &&

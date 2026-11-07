@@ -108,7 +108,8 @@ export function serializeBodyBlocksToContent(
 
 /**
  * Materialize an array of `{ id, translation }` blocks returned by Gemini (blocks-v1)
- * in strict raw block ID order, validating missing/duplicate/empty blocks.
+ * in strict raw block ID order, validating missing/duplicate/empty/unexpected blocks
+ * and preserving 1:1 slot indices so missing/empty blocks never shift subsequent paragraphs.
  */
 export function materializeBlocksToChapter(
   returnedBlocks: { id: string; translation: string }[],
@@ -121,22 +122,36 @@ export function materializeBlocksToChapter(
   missingIds: string[];
   duplicateIds: string[];
   emptyIds: string[];
+  unexpectedIds: string[];
 } {
+  const expectedIdSet = new Set(expectedRawBlocks.map((b) => b.id));
   const map = new Map<string, string>();
   const duplicateIds: string[] = [];
   const emptyIds: string[] = [];
+  const unexpectedIds: string[] = [];
 
   for (const item of returnedBlocks || []) {
     if (!item || typeof item.id !== 'string') continue;
     const id = item.id.trim();
-    const text = typeof item.translation === 'string' ? item.translation.trim() : '';
+    if (!id) continue;
+    if (!expectedIdSet.has(id)) {
+      unexpectedIds.push(id);
+      continue;
+    }
+    const text =
+      typeof item.translation === 'string'
+        ? item.translation.replace(/\u200B/g, '').replace(/\r?\n+/g, ' ').trim()
+        : '';
     if (map.has(id)) {
       duplicateIds.push(id);
     }
     if (!text) {
       emptyIds.push(id);
     }
-    map.set(id, text);
+    // Keep the first non-empty translation if duplicated, or latest non-empty
+    if (!map.has(id) || (!map.get(id) && text)) {
+      map.set(id, text);
+    }
   }
 
   const missingIds: string[] = [];
@@ -151,30 +166,42 @@ export function materializeBlocksToChapter(
     titleTranslated = `Chương ${chapterNumber}`;
   }
 
-  const bodyTranslations: string[] = [];
-  const blockEnds: number[] = [];
-  let cursor = 0;
-
   const expectedBodyBlocks = expectedRawBlocks.filter((b) => b.id !== 'TITLE');
-  expectedBodyBlocks.forEach((b, idx) => {
+  const bodySlotTranslations: string[] = [];
+  let nonEmptyBodyCount = 0;
+
+  for (const b of expectedBodyBlocks) {
     const val = (map.get(b.id) || '').trim();
     if (val) {
-      bodyTranslations.push(val);
-      cursor += val.length;
+      nonEmptyBodyCount += 1;
+    }
+    bodySlotTranslations.push(val);
+  }
+
+  // Serialize preserving 1:1 slots with '\u200B' if at least one block has content,
+  // so a missing/empty block never shifts P0006 into P0005's row.
+  const translatedContent = serializeBodyBlocksToContent(bodySlotTranslations);
+
+  const blockEnds: number[] = [];
+  if (translatedContent.length > 0) {
+    let cursor = 0;
+    bodySlotTranslations.forEach((val, idx) => {
+      const slotText = val.trim().length > 0 ? val : '\u200B';
+      cursor += slotText.length;
       blockEnds.push(cursor);
-      if (idx < expectedBodyBlocks.length - 1) {
+      if (idx < bodySlotTranslations.length - 1) {
         cursor += 2; // "\n\n"
       }
-    }
-  });
+    });
+  }
 
-  const translatedContent = bodyTranslations.join('\n\n');
   const rawBodyCount = expectedBodyBlocks.length;
-  const translatedBodyCount = bodyTranslations.length;
   const isAligned =
     missingIds.length === 0 &&
     emptyIds.length === 0 &&
-    rawBodyCount === translatedBodyCount;
+    duplicateIds.length === 0 &&
+    unexpectedIds.length === 0 &&
+    rawBodyCount === nonEmptyBodyCount;
 
   return {
     titleTranslated,
@@ -182,13 +209,14 @@ export function materializeBlocksToChapter(
     alignment: {
       version: 1,
       rawBlockCount: rawBodyCount,
-      translatedBlockCount: translatedBodyCount,
+      translatedBlockCount: nonEmptyBodyCount,
       isAligned,
       blockEnds,
     },
     missingIds,
     duplicateIds,
     emptyIds,
+    unexpectedIds,
   };
 }
 

@@ -1263,6 +1263,27 @@ export function normalizeThinkingLevel(
 }
 
 /**
+ * Resolves a safe `thinking_level` for the target model according to official @google/genai docs:
+ * - `'minimal'` is ONLY supported on Flash-Lite models (e.g. `gemini-3.1-flash-lite`, `gemini-flash-lite-latest`).
+ * - Passing `'minimal'` to `gemini-3.8-flash`, `gemini-flash-latest`, or `gemini-4-argon` returns a 400 error,
+ *   so it is automatically upgraded to `'low'` on non-lite models.
+ */
+export function resolveThinkingLevelForModel(
+  level?: string | null,
+  modelName?: string | null
+): ThinkingLevelOption {
+  const normalized = normalizeThinkingLevel(level);
+  if (normalized === 'minimal') {
+    const cleanModel = (modelName || '').trim().toLowerCase();
+    const isLiteModel = cleanModel.includes('lite');
+    if (!isLiteModel) {
+      return 'low';
+    }
+  }
+  return normalized;
+}
+
+/**
  * Dynamically inspects @google/genai SDK's `ThinkingLevel` enum + model capability metadata
  * to return the list of available thinking levels (`minimal`, `low`, `medium`, `high`),
  * with `'high'` marked as default.
@@ -1276,12 +1297,11 @@ export function getAvailableThinkingLevelsFromSdk(
       String(v).trim().toLowerCase()
     )
   );
-  const orderedIds: ThinkingLevelOption[] = [
-    'minimal',
-    'low',
-    'medium',
-    'high',
-  ];
+  const cleanModel = (modelName || '').trim().toLowerCase();
+  const isLiteModel = !cleanModel || cleanModel.includes('lite');
+  const orderedIds: ThinkingLevelOption[] = isLiteModel
+    ? ['minimal', 'low', 'medium', 'high']
+    : ['low', 'medium', 'high'];
   const presetMap = new Map<ThinkingLevelOption, ThinkingLevelMeta>(
     THINKING_LEVEL_OPTIONS.map((item) => [item.id, item])
   );
@@ -1306,44 +1326,316 @@ export function getAvailableThinkingLevelsFromSdk(
 }
 
 /**
- * Builds generation_config for `ai.interactions.create` with configurable `thinking_level`
- * ('minimal' | 'low' | 'medium' | 'high', default 'high') and max_output_tokens: 65536.
+ * Builds generation_config for `ai.interactions.create` in @google/genai >= 2.31.0:
+ * - Resolves `thinking_level` safely per model (`'minimal'` -> `'low'` on non-lite models to prevent 400 errors).
+ * - Strips deprecated sampling parameters (`temperature`, `top_p`, `topP`, `topK`, `top_k`) per official @google/genai docs.
+ * - Sets `max_output_tokens: 65536`.
  */
 export function buildInteractionGenerationConfig(
   thinkingLevel?: string | null,
-  extra?: Record<string, unknown>
+  extra?: Record<string, unknown>,
+  modelName?: string | null
 ): {
   thinking_level: ThinkingLevelOption;
   max_output_tokens: number;
   [key: string]: unknown;
 } {
+  const sanitizedExtra: Record<string, unknown> = {};
+  if (extra && typeof extra === 'object') {
+    for (const [k, v] of Object.entries(extra)) {
+      if (
+        k === 'temperature' ||
+        k === 'top_p' ||
+        k === 'topP' ||
+        k === 'top_k' ||
+        k === 'topK' ||
+        k === 'candidateCount' ||
+        k === 'candidate_count'
+      ) {
+        continue;
+      }
+      sanitizedExtra[k] = v;
+    }
+  }
   return {
-    ...(extra || {}),
-    thinking_level: normalizeThinkingLevel(thinkingLevel),
+    ...sanitizedExtra,
+    thinking_level: resolveThinkingLevelForModel(thinkingLevel, modelName),
     max_output_tokens: 65536,
   };
 }
 
 /**
- * Extracts output text from a Gemini Interactions API response (`ai.interactions.create`).
- * Prefers `interaction.output_text` (populated by @google/genai SDK >= 2.31.0)
- * and falls back to concatenating text content from `model_output` steps.
+ * Maximum number of items where `enum` + `minItems`/`maxItems` are enforced at the JSON Schema level.
+ * Per @google/genai docs (`TextResponseFormat_2`), overly large `maxItems`/`enum` constraints on nested arrays
+ * can trigger a `400 INVALID_ARGUMENT` (schema state-space complexity) error, so chapters > 64 blocks
+ * rely on deterministic post-parse ID validation in `materializeBlocksToChapter`.
  */
-export function extractInteractionText(interaction: {
-  output_text?: string | null;
-  steps?: Array<{
-    type?: string;
-    content?:
-      | Array<{ type?: string; text?: string }>
-      | { type?: string; text?: string };
-  }>;
-}): string {
+export const MAX_SCHEMA_ENUM_AND_BOUNDS_ITEMS = 64;
+
+/**
+ * Builds the official Structured Output `response_format` schema for 1:1 Block-ID Chapter Translation
+ * and Full-Chapter Re-Alignment (`blocks-v1`).
+ */
+export function buildBlocksResponseFormat(
+  expectedBlockIds: string[],
+  blocksDescription = 'Danh sách đầy đủ các block đã dịch theo đúng thứ tự nguyên văn, bắt đầu bằng TITLE rồi đến P0001, P0002...'
+): Record<string, unknown> {
+  const idPropertySchema: Record<string, unknown> = {
+    type: 'string',
+    description:
+      'Mã định danh block nguyên gốc (TITLE, P0001, P0002...). Phải khớp 1:1 với input.',
+  };
+  const blocksArraySchema: Record<string, unknown> = {
+    type: 'array',
+    description: blocksDescription,
+    items: {
+      type: 'object',
+      properties: {
+        id: idPropertySchema,
+        translation: {
+          type: 'string',
+          description:
+            'Bản dịch tiếng Việt mượt mà của block này (1 đoạn duy nhất, không chứa ký tự xuống dòng).',
+        },
+      },
+      required: ['id', 'translation'],
+      additionalProperties: false,
+    },
+  };
+
   if (
-    typeof interaction?.output_text === 'string' &&
-    interaction.output_text.trim()
+    expectedBlockIds.length > 0 &&
+    expectedBlockIds.length <= MAX_SCHEMA_ENUM_AND_BOUNDS_ITEMS
   ) {
-    return interaction.output_text;
+    idPropertySchema.enum = expectedBlockIds;
+    blocksArraySchema.minItems = expectedBlockIds.length;
+    blocksArraySchema.maxItems = expectedBlockIds.length;
   }
+
+  return {
+    type: 'object',
+    properties: {
+      blocks: blocksArraySchema,
+    },
+    required: ['blocks'],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Builds the official Structured Output `response_format` schema for Targeted Block-ID Cleanup (`block-cleanup-v1`).
+ */
+export function buildBlockUpdatesResponseFormat(
+  targetIds: string[]
+): Record<string, unknown> {
+  const idPropertySchema: Record<string, unknown> = {
+    type: 'string',
+    description: 'Mã Block ID (TITLE, P0001, P0002...).',
+  };
+  const updatesArraySchema: Record<string, unknown> = {
+    type: 'array',
+    description:
+      'Danh sách các block đã được làm sạch tương ứng 1:1 với các id trong targets.',
+    items: {
+      type: 'object',
+      properties: {
+        id: idPropertySchema,
+        translation: {
+          type: 'string',
+          description:
+            'Bản tiếng Việt hoàn chỉnh, sạch 100% Hán tự và từ tiếng Anh thừa, không xuống dòng.',
+        },
+      },
+      required: ['id', 'translation'],
+      additionalProperties: false,
+    },
+  };
+
+  if (
+    targetIds.length > 0 &&
+    targetIds.length <= MAX_SCHEMA_ENUM_AND_BOUNDS_ITEMS
+  ) {
+    idPropertySchema.enum = targetIds;
+    updatesArraySchema.minItems = targetIds.length;
+    updatesArraySchema.maxItems = targetIds.length;
+  }
+
+  return {
+    type: 'object',
+    properties: {
+      updates: updatesArraySchema,
+    },
+    required: ['updates'],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Builds the official Structured Output `response_format` schema for Alternative Phrasings (`minItems: 3, maxItems: 3`).
+ */
+export function buildAlternativesResponseFormat(
+  count = 3
+): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      alternatives: {
+        type: 'array',
+        minItems: count,
+        maxItems: count,
+        items: { type: 'string' },
+        description: `${count} phương án viết lại đoạn văn.`,
+      },
+    },
+    required: ['alternatives'],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Builds the official Structured Output `response_format` schema for Single-Passage / Full-Chapter Editorial Polish (`{ translation }`).
+ * Synchronized with Editorial Presets v1.14.1 and v1.14.0 Mode A (`{"translation":"..."}`).
+ */
+export function buildEditedTextResponseFormat(): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      translation: {
+        type: 'string',
+        description:
+          'Toàn bộ văn bản tiếng Việt sau khi đã biên tập hoàn chỉnh.',
+      },
+    },
+    required: ['translation'],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Builds the official Structured Output `response_format` schema for Pre-Translation Glossary Extraction (`maxItems: 120`).
+ */
+export function buildGlossaryExtractResponseFormat(
+  maxItems = 120
+): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: {
+      terms: {
+        type: 'array',
+        maxItems,
+        items: {
+          type: 'object',
+          properties: {
+            sourceTerm: {
+              type: 'string',
+              description: 'Từ gốc tiếng Trung chính tắc (chữ Hán).',
+            },
+            targetTerm: {
+              type: 'string',
+              description: 'Bản dịch Hán Việt / Tiếng Việt chuẩn cố định.',
+            },
+            aliases: {
+              type: 'array',
+              items: { type: 'string' },
+              description:
+                'Danh sách các cách viết tiếng Trung khác / biệt danh / đạo hiệu của cùng thực thể này (nếu có, nếu không trả về mảng rỗng []).',
+            },
+            policy: {
+              type: 'string',
+              enum: ['force', 'prefer', 'contextual', 'keep_source'],
+              description:
+                'Chính sách dịch: force (cố định) | prefer (ưu tiên) | contextual (tùy ngữ cảnh) | keep_source (giữ nguyên).',
+            },
+            category: {
+              type: 'string',
+              enum: [
+                'character',
+                'location',
+                'cultivation',
+                'skill',
+                'organization',
+                'item',
+                'title',
+                'pronoun',
+                'other',
+              ],
+              description:
+                'Phân loại: character | location | cultivation | skill | organization | item | title | pronoun | other',
+            },
+            notes: {
+              type: 'string',
+              description:
+                'Ghi chú ngắn gọn về vai trò, giới tính, quan hệ và quy tắc xưng hô.',
+            },
+          },
+          required: [
+            'sourceTerm',
+            'targetTerm',
+            'aliases',
+            'policy',
+            'category',
+            'notes',
+          ],
+          additionalProperties: false,
+        },
+      },
+    },
+    required: ['terms'],
+    additionalProperties: false,
+  };
+}
+
+/**
+ * Extracts output text from a Gemini Interactions API response (`ai.interactions.create`).
+ * - Validates `interaction.status` and `interaction.errors` first so `failed`, `cancelled`, or `incomplete`
+ *   interactions throw an explicit error rather than silently returning empty/partial text.
+ * - Strictly extracts text from `model_output` steps (never mixing `thought` reasoning steps),
+ *   falling back to `interaction.output_text`.
+ */
+export function extractInteractionText(
+  interaction: {
+    status?: string | null;
+    errors?: Array<{ code?: string | number; message?: string }> | null;
+    output_text?: string | null;
+    steps?: Array<{
+      type?: string;
+      finish_reason?: string;
+      content?:
+        | Array<{ type?: string; text?: string }>
+        | { type?: string; text?: string };
+    }>;
+  },
+  contextLabel = 'InteractionOutput'
+): string {
+  const status =
+    typeof interaction?.status === 'string'
+      ? interaction.status.trim().toLowerCase()
+      : '';
+
+  if (Array.isArray(interaction?.errors) && interaction.errors.length > 0) {
+    const errDetail = interaction.errors
+      .map((e) => `${e?.code ? `[${e.code}] ` : ''}${e?.message || 'Lỗi từ Gemini Interactions API'}`)
+      .join('; ');
+    logger.error(
+      'KEY_POOL',
+      `✖ [${contextLabel}] Interaction trả về lỗi hệ thống (status=${status || 'unknown'}): ${errDetail}`
+    );
+    throw new Error(`[INTERACTION_ERROR] Phản hồi từ Gemini bị lỗi (${status || 'error'}): ${errDetail}`);
+  }
+
+  if (status === 'failed' || status === 'cancelled') {
+    logger.error(
+      'KEY_POOL',
+      `✖ [${contextLabel}] Interaction kết thúc với trạng thái "${status}".`
+    );
+    throw new Error(
+      `[INTERACTION_${status.toUpperCase()}] Phiên xử lý AI kết thúc với trạng thái "${status}" (có thể do bộ lọc an toàn Safety hoặc ngắt kết nối).`
+    );
+  }
+
+  // Prefer concatenating all chronological `model_output` steps (as recommended by @google/genai Interactions docs
+  // so multi-step outputs are never truncated to only the trailing step, while strictly ignoring `thought` steps)
+  let extractedText = '';
   if (Array.isArray(interaction?.steps)) {
     const chunks: string[] = [];
     for (const step of interaction.steps) {
@@ -1359,14 +1651,36 @@ export function extractInteractionText(interaction: {
       }
     }
     if (chunks.length > 0) {
-      return chunks.join('');
+      extractedText = chunks.join('');
     }
   }
-  return '';
+
+  if (
+    !extractedText.trim() &&
+    typeof interaction?.output_text === 'string' &&
+    interaction.output_text.trim()
+  ) {
+    extractedText = interaction.output_text;
+  }
+
+  if (status === 'incomplete') {
+    logger.warn(
+      'KEY_POOL',
+      `⚠️ [${contextLabel}] Interaction có trạng thái "incomplete" (chạm giới hạn token đầu ra max_output_tokens hoặc bị ngắt sớm). Độ dài text=${extractedText.length}.`
+    );
+    if (!extractedText.trim()) {
+      throw new Error(
+        '[INTERACTION_INCOMPLETE] Phản hồi từ AI bị ngắt giữa chừng (status=incomplete) và không có dữ liệu đầu ra.'
+      );
+    }
+  }
+
+  return extractedText;
 }
 
 /**
- * Safely parses JSON from an Interaction output string, stripping markdown code fences if present.
+ * Safely parses JSON from an Interaction output string, stripping markdown code fences if present
+ * and detecting truncated JSON outputs (e.g. when max_output_tokens is exceeded).
  */
 export function safeParseInteractionJson<T>(
   rawText: string,
@@ -1375,13 +1689,35 @@ export function safeParseInteractionJson<T>(
   const trimmed = (rawText || '').trim();
   if (!trimmed) {
     logger.error('KEY_POOL', `✖ [${contextLabel}] Model trả về phản hồi rỗng (0 ký tự).`);
-    throw new Error('Model trả về phản hồi rỗng.');
+    throw new Error('[EMPTY_STRUCTURED_OUTPUT] Model trả về phản hồi rỗng (có thể do bộ lọc Safety hoặc chạm giới hạn suy luận).');
   }
   const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
   const candidate = fenceMatch ? fenceMatch[1].trim() : trimmed;
   try {
     return JSON.parse(candidate) as T;
   } catch (firstErr) {
+    // Check if the JSON was clearly truncated mid-stream (starts with '{' or '[' but doesn't end with '}' or ']')
+    const startsLikeJson =
+      candidate.startsWith('{') || candidate.startsWith('[');
+    const endsLikeJson =
+      candidate.endsWith('}') || candidate.endsWith(']');
+
+    if (startsLikeJson && !endsLikeJson) {
+      logger.error(
+        'KEY_POOL',
+        `✖ [${contextLabel}] Chuỗi JSON từ AI bị cắt cụt giữa chừng (Truncated JSON — khả năng cao vượt max_output_tokens)`,
+        {
+          contextLabel,
+          rawLength: trimmed.length,
+          rawHeadPreview: trimmed.slice(0, 400),
+          rawTailPreview: trimmed.slice(-400),
+        }
+      );
+      throw new Error(
+        `[TRUNCATED_JSON_OUTPUT] Chuỗi JSON trả về từ AI bị cắt cụt giữa chừng (độ dài ${trimmed.length} ký tự, có thể do chương quá dài chạm trần max_output_tokens).`
+      );
+    }
+
     const objMatch = candidate.match(/(\{[\s\S]*\}|\[[\s\S]*\])/);
     if (objMatch) {
       try {
