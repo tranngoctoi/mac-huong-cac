@@ -1500,9 +1500,15 @@ export default function NovelLibraryModal({
                               />
                             ) : (
                               <div className="flex h-full w-full flex-col items-center justify-between bg-gradient-to-b from-[#F3EFE6] to-[#E5DEC9] p-2 text-center">
-                                <span className="rounded bg-[#8C2D19]/15 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#8C2D19]">
-                                  {(novel.genre || 'Tiên Hiệp').split('/')[0].trim()}
-                                </span>
+                                {isActive ? (
+                                  <span className="rounded bg-[#8C2D19] px-1.5 py-0.5 text-[9px] font-bold text-white shadow-xs">
+                                    Đang mở
+                                  </span>
+                                ) : (
+                                  <span className="rounded bg-[#8C2D19]/15 px-1.5 py-0.5 font-mono text-[9px] font-bold text-[#8C2D19]">
+                                    {(novel.genre || 'Tiên Hiệp').split('/')[0].trim()}
+                                  </span>
+                                )}
                                 <span className="line-clamp-3 font-serif text-xs font-bold leading-snug text-[#1C1917]">
                                   {novel.title}
                                 </span>
@@ -1513,7 +1519,7 @@ export default function NovelLibraryModal({
                                 </span>
                               </div>
                             )}
-                            {isActive && (
+                            {isActive && novel.coverDataBase64 && (
                               <span className="absolute top-1 left-1 rounded bg-[#8C2D19] px-1.5 py-0.5 text-[9px] font-bold text-white shadow-xs">
                                 Đang mở
                               </span>

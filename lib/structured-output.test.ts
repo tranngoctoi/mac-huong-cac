@@ -7,6 +7,8 @@ import {
   buildEditedTextResponseFormat,
   buildGlossaryExtractResponseFormat,
   buildInteractionGenerationConfig,
+  DEFAULT_INTERACTION_REQUEST_OPTIONS,
+  extractBlocksArrayFromParsedJson,
   extractInteractionText,
   resolveThinkingLevelForModel,
   safeParseInteractionJson,
@@ -14,8 +16,14 @@ import {
 import {
   buildChapterBlockPairs,
   materializeBlocksToChapter,
+  normalizeReturnedBlockId,
   splitRawIntoBlocks,
 } from './block-engine';
+
+test('DEFAULT_INTERACTION_REQUEST_OPTIONS disables internal SDK retries so 50-key pool rotates immediately', () => {
+  assert.equal(DEFAULT_INTERACTION_REQUEST_OPTIONS.maxRetries, 0);
+  assert.equal(DEFAULT_INTERACTION_REQUEST_OPTIONS.timeout, 240_000);
+});
 
 test('resolveThinkingLevelForModel upgrades minimal to low on non-lite models to prevent 400 error', () => {
   assert.equal(resolveThinkingLevelForModel('minimal', 'gemini-3.8-flash'), 'low');
@@ -129,7 +137,7 @@ test('Presets v1.14.1 and v1.14.0 in DEFAULT_INSTRUCTION_PROFILES match all Stru
   }
 });
 
-test('extractInteractionText ignores thought steps, combines model_output steps, and validates failed status', () => {
+test('extractInteractionText extracts from steps, outputs (when steps is []), and candidates, while ignoring thought steps', () => {
   const validInteraction = {
     status: 'completed',
     steps: [
@@ -150,6 +158,24 @@ test('extractInteractionText ignores thought steps, combines model_output steps,
 
   const text = extractInteractionText(validInteraction, 'TestValid');
   assert.equal(text, '{"blocks":[{"id":"TITLE","translation":"Chương 1: Khởi đầu"}]}');
+
+  // Simulate @google/genai@2.31.0 normalizeInteractionShape where steps is [] and outputs has the model text
+  const outputsInteraction = {
+    status: 'completed',
+    steps: [],
+    outputs: [
+      { type: 'thought', text: 'Thinking internal text' },
+      {
+        type: 'text',
+        text: '{"blocks":[{"id":"TITLE","translation":"Chương 2800: Đầu Hổ"},{"id":"P0001","translation":"Năm mới phát tài!"}]}',
+      },
+    ],
+  };
+  const outputsText = extractInteractionText(outputsInteraction, 'TestOutputs');
+  assert.equal(
+    outputsText,
+    '{"blocks":[{"id":"TITLE","translation":"Chương 2800: Đầu Hổ"},{"id":"P0001","translation":"Năm mới phát tài!"}]}'
+  );
 
   assert.throws(
     () =>
@@ -180,7 +206,26 @@ test('safeParseInteractionJson parses valid JSON and detects truncated JSON outp
   );
 });
 
-test('materializeBlocksToChapter preserves 1:1 block slot positions when a middle block is missing or out of order', () => {
+test('normalizeReturnedBlockId and extractBlocksArrayFromParsedJson handle non-canonical IDs and wrapper shapes', () => {
+  assert.equal(normalizeReturnedBlockId('title'), 'TITLE');
+  assert.equal(normalizeReturnedBlockId('[TITLE]'), 'TITLE');
+  assert.equal(normalizeReturnedBlockId('p1'), 'P0001');
+  assert.equal(normalizeReturnedBlockId('[P0012]'), 'P0012');
+  assert.equal(normalizeReturnedBlockId('#P0105'), 'P0105');
+  assert.equal(normalizeReturnedBlockId('25'), 'P0025');
+
+  const arrFromUpdates = extractBlocksArrayFromParsedJson({
+    updates: [{ id: 'P1', translation: 'Đoạn 1' }],
+  });
+  assert.equal(arrFromUpdates?.length, 1);
+
+  const arrFromTopLevel = extractBlocksArrayFromParsedJson([
+    { id: 'TITLE', translation: 'Tiêu đề' },
+  ]);
+  assert.equal(arrFromTopLevel?.length, 1);
+});
+
+test('materializeBlocksToChapter preserves 1:1 block slot positions and supports normalized IDs and positional fallback', () => {
   const rawBlocks = splitRawIntoBlocks(
     '第1章 归来',
     '第一段内容。\n\n第二段内容。\n\n第三段内容。'
@@ -193,9 +238,9 @@ test('materializeBlocksToChapter preserves 1:1 block slot positions when a middl
   // Simulate model returning P0003 before P0001, missing P0002, and adding an unexpected P9999
   const materialized = materializeBlocksToChapter(
     [
-      { id: 'P0003', translation: 'Nội dung đoạn ba.' },
-      { id: 'TITLE', translation: 'Chương 1: Trở về' },
-      { id: 'P0001', translation: 'Nội dung đoạn một.' },
+      { id: 'p3', translation: 'Nội dung đoạn ba.' },
+      { id: '[TITLE]', translation: 'Chương 1: Trở về' },
+      { id: 'P1', translation: 'Nội dung đoạn một.' },
       { id: 'P9999', translation: 'Đoạn lạ không tồn tại.' },
     ],
     rawBlocks,
@@ -226,3 +271,62 @@ test('materializeBlocksToChapter preserves 1:1 block slot positions when a middl
   assert.equal(p2?.isMissingTranslation, true);
   assert.equal(p3?.translation, 'Nội dung đoạn ba.');
 });
+
+test('scanChapterQA detects residual Chinese, leaked English tokens, and glossary violations accurately', async () => {
+  const { scanChapterQA, DEFAULT_QA_VALIDATION_RULES } = await import('./qa-scanner');
+  const report = scanChapterQA(
+    {
+      titleRaw: '第1章 宗门测试',
+      rawContent: '韩立走进大殿，看着眼前的掌门。\n\n掌门看着韩立，他心中十分平静。',
+      titleTranslated: 'Chương 1: Khảo thí tông môn',
+      translatedContent:
+        'Hàn Lập bước vào đại điện, suddenly nhìn thấy掌门 trước mặt.\n\nTrong lòng hắn vô cùng bình tĩnh.',
+      status: 'translated',
+      chapterNumber: 1,
+    },
+    [],
+    DEFAULT_QA_VALIDATION_RULES,
+    [
+      {
+        id: 'g-1',
+        novelId: 'n-1',
+        sourceTerm: '韩立',
+        targetTerm: 'Hàn Lập',
+        category: 'character',
+        policy: 'force',
+      },
+      {
+        id: 'g-2',
+        novelId: 'n-1',
+        sourceTerm: '掌门',
+        targetTerm: 'Chưởng môn',
+        category: 'organization',
+        policy: 'force',
+      },
+    ]
+  );
+
+  assert.equal(report.hasIssues, true);
+  assert.ok(report.residualChineseCount >= 2, 'Must detect residual Chinese characters 掌门');
+  assert.ok(report.leakedEnglishCount >= 1, 'Must detect leaked English word suddenly');
+  assert.ok(report.glossaryViolationCount >= 1, 'Must detect missing glossary translation Chưởng môn');
+});
+
+test('createWire1HeartbeatStream streams initial whitespace and JSON payload or renewWire1 envelope', async () => {
+  const { createWire1HeartbeatStream } = await import('./gemini-server');
+  const response = createWire1HeartbeatStream(async () => ({
+    body: {
+      blocks: [{ id: 'TITLE', translation: 'Chương 1' }],
+    },
+    status: 200,
+  }));
+
+  const rawText = await response.text();
+  assert.ok(rawText.startsWith(' \n'), 'Must flush initial whitespace heartbeat');
+  const parsed = JSON.parse(rawText.trim());
+  assert.equal(parsed.blocks[0].id, 'TITLE');
+  assert.equal(parsed.blocks[0].translation, 'Chương 1');
+});
+
+
+

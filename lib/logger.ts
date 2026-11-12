@@ -499,7 +499,7 @@ export async function safeFetchJson<T = Record<string, unknown>>(
     typeof init.body === 'string' ? init.body.length : undefined;
 
   const triedKeySet = new Set<number>();
-  const MAX_WIRE1_RENEWALS = 10;
+  const MAX_WIRE1_RENEWALS = 50;
   let wireRenewalCount = 0;
 
   while (true) {
@@ -509,6 +509,8 @@ export async function safeFetchJson<T = Record<string, unknown>>(
 
     const headers = new Headers(init.headers || {});
     headers.set('X-MHC-Request-Id', reqId);
+    headers.set('X-MHC-Wire-Renewal', String(wireRenewalCount));
+    headers.set('X-MHC-Max-Wire-Renewals', String(MAX_WIRE1_RENEWALS));
     if (triedKeySet.size > 0) {
       headers.set('X-MHC-Tried-Keys', Array.from(triedKeySet).join(','));
     }
@@ -690,8 +692,6 @@ export async function safeFetchJson<T = Record<string, unknown>>(
     const serverDebugTrace = recordData.debugTrace as
       | ServerDebugTrace
       | undefined;
-    const serverErrMessage =
-      typeof recordData.error === 'string' ? recordData.error : undefined;
 
     if (
       serverDebugTrace &&
@@ -742,31 +742,56 @@ export async function safeFetchJson<T = Record<string, unknown>>(
     }
 
     // Cách 1: Server requested Sợi dây 1 Renewal (`renewWire1: true`) so the next key runs on a brand-new 300s clock!
-    if (
-      recordData.renewWire1 === true &&
-      wireRenewalCount < MAX_WIRE1_RENEWALS &&
-      !init.signal?.aborted
-    ) {
+    if (recordData.renewWire1 === true) {
       if (Array.isArray(recordData.triedKeyIndices)) {
         for (const k of recordData.triedKeyIndices) {
           if (typeof k === 'number' && k > 0) triedKeySet.add(k);
         }
       }
-      wireRenewalCount += 1;
-      logger.info(
-        options.scope,
-        `🔄 Làm mới Sợi dây 1 (#${wireRenewalCount}) sau ${(durationMs / 1000).toFixed(1)}s — Đã đóng kết nối cũ & mở kết nối MỚI (Reset đồng hồ 300s về 0s) để chuyển sang Key tiếp theo!`,
-        {
+      if (wireRenewalCount < MAX_WIRE1_RENEWALS && !init.signal?.aborted) {
+        wireRenewalCount += 1;
+        logger.info(
+          options.scope,
+          `🔄 Làm mới Sợi dây 1 (#${wireRenewalCount}) sau ${(durationMs / 1000).toFixed(1)}s — Đã đóng kết nối cũ & mở kết nối MỚI (Reset đồng hồ 300s về 0s) để chuyển sang Key tiếp theo!`,
+          {
+            reqId,
+            wireRenewalCount,
+            triedKeys: Array.from(triedKeySet),
+            previousConnectionDurationMs: durationMs,
+          },
           reqId,
-          wireRenewalCount,
-          triedKeys: Array.from(triedKeySet),
-          previousConnectionDurationMs: durationMs,
-        },
-        reqId,
-        durationMs
+          durationMs
+        );
+        continue;
+      }
+
+      // If wireRenewalCount reached MAX_WIRE1_RENEWALS (or aborted), NEVER treat renewWire1 as success!
+      const traceAttempts = serverDebugTrace?.attempts || [];
+      const saw429 = traceAttempts.some(
+        (a) =>
+          a.outcome === 'rate_limit_429' ||
+          (a.errorMessage && a.errorMessage.includes('429'))
       );
-      continue;
+      const lastAttemptErr =
+        traceAttempts.length > 0
+          ? traceAttempts[traceAttempts.length - 1]?.errorMessage
+          : undefined;
+      if (saw429) {
+        recordData.poolExhausted429 = true;
+        recordData.__httpStatus = 429;
+        recordData.error =
+          lastAttemptErr ||
+          `Tất cả các Key đã thử (${triedKeySet.size} Key) đều chạm giới hạn Rate Limit (429).`;
+      } else {
+        recordData.__httpStatus = 504;
+        recordData.error =
+          lastAttemptErr ||
+          `Đã thử qua ${triedKeySet.size} Key (${wireRenewalCount} lần làm mới kết nối) nhưng chưa nhận được phản hồi hợp lệ từ AI.`;
+      }
     }
+
+    const serverErrMessage =
+      typeof recordData.error === 'string' ? recordData.error : undefined;
 
     const effectiveStatus =
       typeof recordData.__httpStatus === 'number'
@@ -776,7 +801,8 @@ export async function safeFetchJson<T = Record<string, unknown>>(
       res.ok &&
       effectiveStatus >= 200 &&
       effectiveStatus < 300 &&
-      !recordData.error;
+      !recordData.error &&
+      recordData.renewWire1 !== true;
 
     if (!effectiveOk) {
       logger.error(

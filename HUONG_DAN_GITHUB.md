@@ -1,98 +1,83 @@
-# Hướng Dẫn Đẩy Dự Án Mặc Hương Các (`mhc`) Lên GitHub
+# Hướng Dẫn Đưa Dự Án Lên GitHub (Từ A - Z)
 
-Tài liệu này hướng dẫn từng bước để đẩy **riêng thư mục `mhc`** lên một kho lưu trữ (Repository) độc lập trên GitHub, kèm theo cách cập nhật code về sau và bảo mật 50 Gemini API Key.
-
----
-
-## 1. Chuẩn bị trước khi đẩy (Chỉ làm 1 lần đầu)
-
-1. **Cài đặt Git** (nếu máy chưa có): Tải tại https://git-scm.com/download/win
-2. **Tạo Repository mới trên GitHub**:
-   - Truy cập https://github.com/new
-   - **Repository name**: Đặt tên (ví dụ: `mac-huong-cac-studio` hoặc `mhc-translator`)
-   - **Chế độ hiển thị**: Nên chọn **Private** (Riêng tư) hoặc **Public** (Công khai)
-   - **Lưu ý quan trọng**: **KHÔNG** tích vào ô *"Add a README file"*, *"Add .gitignore"* hay *"Choose a license"* (để kho lưu trữ trống hoàn toàn, giúp đẩy code lên không bị xung đột).
-   - Bấm **Create repository** và copy đường link HTTPS của repo (ví dụ: `https://github.com/<ten-tai-khoan>/<ten-repo>.git`).
+Tài liệu này hướng dẫn từng bước để bạn lưu trữ, quản lý phiên bản và chia sẻ mã nguồn **Mặc Hương Các Studio** lên tài khoản GitHub cá nhân một cách an toàn.
 
 ---
 
-## 2. Bảo mật API Key trước khi đẩy lên GitHub
-
-File [`.gitignore`](./.gitignore) trong thư mục `mhc` đã được cấu hình sẵn để **tự động loại bỏ** các file nhạy cảm và thư mục nặng không cần đẩy lên GitHub:
-- `.env*` (các biến môi trường chứa API Key)
-- `data/project-key-pool.json` (file lưu bể 50 Gemini API Key trên máy chủ)
-- `node_modules/` và `.next/`
-
-> 💡 **Lưu ý**: Nếu bạn chọn chế độ **Public** trên GitHub hoặc muốn导入 (Import) link GitHub này sang **Google AI Studio**, Google sẽ tự động quét và khóa các API Key bị lộ. Nhờ có `data/project-key-pool.json` trong `.gitignore`, các API Key của bạn sẽ luôn nằm an toàn trên máy riêng chứ không bị đẩy lên GitHub.
+## Bước 1: Chuẩn bị công cụ
+1. **Tài khoản GitHub**: Đăng ký tại [github.com](https://github.com/) nếu bạn chưa có.
+2. **Cài đặt Git**: Tải và cài đặt từ [git-scm.com](https://git-scm.com/). Khi cài đặt, bạn có thể giữ nguyên các thiết lập mặc định (bấm *Next* liên tục).
 
 ---
 
-## 3. Các lệnh đẩy thư mục `mhc` lên GitHub lần đầu
+## Bước 2: Tạo Kho chứa (Repository) mới trên GitHub
+1. Đăng nhập vào GitHub.
+2. Ở góc trên bên phải màn hình, bấm vào biểu tượng dấu **`+`** -> chọn **New repository**.
+3. Điền thông tin cho kho chứa:
+   - **Repository name**: Đặt tên cho dự án (ví dụ: `mac-huong-cac-studio`).
+   - **Description**: Studio Dịch, Biên Tập & Đọc Truyện Chữ Trung - Việt AI.
+   - **Public / Private**: Chọn **Private** (Riêng tư — chỉ mình bạn thấy) hoặc **Public** (Công khai).
+   - **Lưu ý quan trọng**: **KHÔNG** tích vào các ô *Add a README file*, *Add .gitignore*, hay *Choose a license* (vì mã nguồn dự án của chúng ta đã có sẵn các tệp này).
+4. Bấm nút **Create repository** màu xanh lá. Giữ nguyên trang web hiện ra để lấy đường dẫn ở Bước 4.
 
-Mở **PowerShell** hoặc **Terminal** (trong VS Code / Cursor / Windows Terminal) và chạy lần lượt các lệnh sau:
+---
 
-### Bước 1: Di chuyển vào đúng thư mục `mhc`
+## Bước 3: Đưa mã nguồn từ máy tính vào Git
+1. Mở thư mục chứa dự án trên máy tính của bạn.
+2. Mở **Terminal** (hoặc **PowerShell** / **Git Bash**) ngay tại thư mục gốc của dự án (nơi có tệp `package.json`):
+   ```powershell
+   cd "đường-dẫn-tới-thư-mục-dự-án-của-bạn"
+   ```
+3. Chạy lần lượt từng lệnh dưới đây (bấm *Enter* sau mỗi dòng):
+
+   - **Cấu hình tên và email (chỉ cần làm 1 lần đầu tiên trên máy):**
+     ```powershell
+     git config --global user.name "Tên của bạn"
+     git config --global user.email "email-dang-ky-github@gmail.com"
+     ```
+
+   - **Khởi tạo Git trong thư mục dự án:**
+     ```powershell
+     git init
+     ```
+
+   - **Đưa toàn bộ tệp vào danh sách chuẩn bị lưu:**
+     ```powershell
+     git add .
+     ```
+     *(Tệp `.gitignore` có sẵn trong dự án sẽ tự động loại trừ các thư mục nặng như `node_modules`, `.next` và các tệp nhạy cảm như `.env.local` hay `/data/project-key-pool.json` để bảo vệ tuyệt đối API Key của bạn).*
+
+   - **Đóng gói phiên bản đầu tiên (Commit):**
+     ```powershell
+     git commit -m "Khởi tạo dự án Mặc Hương Các Studio"
+     ```
+
+---
+
+## Bước 4: Đẩy mã nguồn lên GitHub
+Quay lại trang web GitHub ở **Bước 2**, sao chép đường dẫn kho chứa của bạn (có dạng `https://github.com/ten-ban/mac-huong-cac-studio.git`), sau đó chạy 3 lệnh sau trong Terminal:
+
 ```powershell
-cd "c:\Users\Admin\Documents\Codex\2026-07-24\sites-plugin-sites-openai-bundled-create-2\mhc"
-```
-
-### Bước 2: Khởi tạo Git riêng cho thư mục `mhc`
-```powershell
-git init
 git branch -M main
-```
-
-### Bước 3: Kiểm tra danh sách file sẽ được đẩy lên
-```powershell
-git status
-```
-*(Đảm bảo trong danh sách không có `.env.local` hay `data/project-key-pool.json`).*
-
-### Bước 4: Đóng gói toàn bộ code trong `mhc`
-```powershell
-git add .
-git commit -m "Initial commit: Mac Huong Cac Studio (tich hop chong ngat 300s Soi day 1)"
-```
-
-### Bước 5: Liên kết với GitHub Repository và đẩy code lên
-Thay đường dẫn bên dưới bằng link Repository GitHub của bạn:
-```powershell
-git remote add origin https://github.com/<TEN_TAI_KHOAN>/<TEN_REPO>.git
+git remote add origin https://github.com/ten-ban/mac-huong-cac-studio.git
 git push -u origin main
 ```
-*(Nếu đẩy lần đầu trên máy, cửa sổ đăng nhập GitHub sẽ hiện ra, bạn chỉ cần bấm **Sign in with your browser** để xác nhận).*
+
+> **Lưu ý khi đăng nhập:** Nếu đây là lần đầu tiên bạn đẩy code từ máy tính này, một cửa sổ nhỏ sẽ bật lên yêu cầu bạn bấm **Sign in with your browser** để xác nhận quyền truy cập với GitHub. Sau khi xác nhận xong, toàn bộ mã nguồn sẽ được tải lên.
 
 ---
 
-## 4. Cách cập nhật code lên GitHub ở những lần sau
-
-Sau này mỗi khi bạn sửa code trong `mhc` và muốn cập nhật lên GitHub, chỉ cần mở Terminal tại thư mục `mhc` và chạy 3 dòng lệnh:
+## Bước 5: Cách cập nhật khi bạn sửa code sau này
+Mỗi khi bạn chỉnh sửa giao diện hoặc nâng cấp tính năng trên máy tính và muốn cập nhật lên GitHub, bạn chỉ cần mở Terminal tại thư mục dự án và gõ 3 lệnh:
 
 ```powershell
-cd "c:\Users\Admin\Documents\Codex\2026-07-24\sites-plugin-sites-openai-bundled-create-2\mhc"
 git add .
-git commit -m "Cap nhat tinh nang moi"
+git commit -m "Mô tả ngắn gọn những gì vừa cập nhật"
 git push
 ```
 
 ---
 
-## 5. Xử lý các lỗi thường gặp khi Push
-
-1. **Lỗi `remote origin already exists` khi chạy lệnh `git remote add origin`**:
-   - Chạy lệnh sau để đổi sang link repo mới:
-     ```powershell
-     git remote set-url origin https://github.com/<TEN_TAI_KHOAN>/<TEN_REPO>.git
-     ```
-2. **Lỗi `Author identity unknown` khi chạy `git commit`**:
-   - Khai báo tên và email Git (chỉ cần chạy 1 lần):
-     ```powershell
-     git config --global user.name "Ten Cua Ban"
-     git config --global user.email "email-cua-ban@gmail.com"
-     ```
-3. **Lỗi `failed to push some refs` (do lỡ tạo sẵn file README trên GitHub)**:
-   - Kéo file trên GitHub về gộp trước rồi đẩy lên:
-     ```powershell
-     git pull origin main --allow-unrelated-histories
-     git push -u origin main
-     ```
+## 🔒 Quy Tắc Bảo Mật Quan Trọng
+- **Tuyệt đối không** xóa dòng `.env*` hoặc `/data` trong tệp `.gitignore`.
+- Không bao giờ dán trực tiếp mã `GEMINI_API_KEY` cố định vào các tệp mã nguồn `.ts` hoặc `.tsx`. Hãy luôn sử dụng bảng quản lý **50 API Keys** trong giao diện ứng dụng hoặc tệp `.env.local` trên máy cá nhân.

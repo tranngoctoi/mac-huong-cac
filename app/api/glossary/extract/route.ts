@@ -3,6 +3,7 @@ import {
   buildGlossaryExtractResponseFormat,
   buildInteractionGenerationConfig,
   createWire1HeartbeatStream,
+  DEFAULT_INTERACTION_REQUEST_OPTIONS,
   extractInteractionText,
   geminiKeyPool,
   parseTriedKeysHeader,
@@ -88,15 +89,15 @@ export async function POST(req: NextRequest) {
           ? fallbackModel.trim()
           : undefined;
 
-      const slicedInput = textToScan.slice(0, 45000);
+      const fullInput = textToScan;
 
       logger.info(
         'GLOSSARY_SCAN',
-        `▶ Bắt đầu quét Glossary trên Server (${slicedInput.length} ký tự Hán, bỏ qua ${existingTermsCount} mục đã có, model=${selectedModel}, thinkingLevel=${resolvedThinkingLevel})`,
+        `▶ Bắt đầu quét Glossary trên Server (${fullInput.length} ký tự Hán, bỏ qua ${existingTermsCount} mục đã có, model=${selectedModel}, thinkingLevel=${resolvedThinkingLevel})`,
         {
           reqId,
           rawTextLength: textToScanLength,
-          sentChars: slicedInput.length,
+          sentChars: fullInput.length,
           existingTermsCount,
           selectedModel,
           fallbackModel: cleanFallbackModel,
@@ -130,12 +131,12 @@ QUY TẮC TRÍCH XUẤT CHUẨN:
       const prompt = `Hãy quét kỹ văn bản tiếng Trung dưới đây và trích xuất danh sách thuật ngữ + biến thể (aliases) + ma trận nhân vật chuẩn xác nhất cho bộ Từ điển tiền kỳ.${existingHint}
 
 [VĂN BẢN TIẾNG TRUNG CẦN QUÉT]:
-${slicedInput}`;
+${fullInput}`;
 
       const responseFormatSchema = buildGlossaryExtractResponseFormat(120);
 
       const {
-        result: interaction,
+        result: { terms, rawOutputText },
         keyIndexUsed,
         totalKeys,
         modelUsed,
@@ -144,25 +145,61 @@ ${slicedInput}`;
         totalDurationMs,
       } = await geminiKeyPool.executeWithKeyRotation(
         async (ai, slotInfo) => {
-          return await ai.interactions.create({
-            model: slotInfo.activeModel,
-            store: false,
-            system_instruction: systemPrompt,
-            input: prompt,
-            generation_config: buildInteractionGenerationConfig(
-              thinkingLevel,
-              undefined,
-              slotInfo.activeModel
-            ),
-            response_format: responseFormatSchema,
-          });
+          const interaction = await ai.interactions.create(
+            {
+              model: slotInfo.activeModel,
+              store: false,
+              system_instruction: systemPrompt,
+              input: prompt,
+              generation_config: buildInteractionGenerationConfig(
+                thinkingLevel,
+                undefined,
+                slotInfo.activeModel
+              ),
+              response_format: responseFormatSchema,
+            },
+            DEFAULT_INTERACTION_REQUEST_OPTIONS
+          );
+
+          const contextLabel = `GlossaryExtract[${reqId}#Key${slotInfo.keyIndex}]`;
+          const extractedText = extractInteractionText(interaction, contextLabel);
+          const parsed = safeParseInteractionJson<{
+            terms?: Array<{
+              sourceTerm: string;
+              targetTerm: string;
+              aliases?: string[];
+              policy?: 'force' | 'prefer' | 'contextual' | 'keep_source';
+              category: string;
+              notes: string;
+            }>;
+          }>(extractedText, contextLabel);
+
+          if (!Array.isArray(parsed.terms)) {
+            throw new Error(
+              '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng thiếu mảng "terms" hợp lệ.'
+            );
+          }
+
+          const validTerms = parsed.terms.filter(
+            (t) =>
+              t &&
+              typeof t.sourceTerm === 'string' &&
+              t.sourceTerm.trim().length > 0 &&
+              typeof t.targetTerm === 'string' &&
+              t.targetTerm.trim().length > 0
+          );
+
+          return {
+            terms: validTerms,
+            rawOutputText: extractedText,
+          };
         },
         selectedModel,
         cleanFallbackModel,
         {
           reqId,
           endpoint: '/api/glossary/extract',
-          label: `GlossaryPreScan (${slicedInput.length} chars • thinking=${resolvedThinkingLevel})`,
+          label: `GlossaryPreScan (${fullInput.length} chars • thinking=${resolvedThinkingLevel})`,
           signal: req.signal,
           initialTriedKeys,
         }
@@ -171,34 +208,6 @@ ${slicedInput}`;
       resolvedThinkingLevel = resolveThinkingLevelForModel(
         thinkingLevel,
         modelUsed
-      );
-
-      const contextLabel = `GlossaryExtract[${reqId}]`;
-      const rawOutputText = extractInteractionText(interaction, contextLabel);
-      const parsed = safeParseInteractionJson<{
-        terms?: Array<{
-          sourceTerm: string;
-          targetTerm: string;
-          aliases?: string[];
-          policy?: 'force' | 'prefer' | 'contextual' | 'keep_source';
-          category: string;
-          notes: string;
-        }>;
-      }>(rawOutputText, contextLabel);
-
-      if (!Array.isArray(parsed.terms)) {
-        throw new Error(
-          '[INVALID_STRUCTURED_OUTPUT] Model trả về JSON nhưng thiếu mảng "terms" hợp lệ.'
-        );
-      }
-
-      const terms = parsed.terms.filter(
-        (t) =>
-          t &&
-          typeof t.sourceTerm === 'string' &&
-          t.sourceTerm.trim().length > 0 &&
-          typeof t.targetTerm === 'string' &&
-          t.targetTerm.trim().length > 0
       );
       const routeDurationMs = Date.now() - routeStartMs;
 
@@ -216,7 +225,7 @@ ${slicedInput}`;
         totalPoolKeys: totalKeys,
         inputSummary: {
           rawTextLength: textToScanLength,
-          sentChars: slicedInput.length,
+          sentChars: fullInput.length,
           existingTermsCount,
           thinkingLevel: resolvedThinkingLevel,
         },

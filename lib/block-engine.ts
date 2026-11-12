@@ -107,12 +107,104 @@ export function serializeBodyBlocksToContent(
 }
 
 /**
+ * Normalizes a block ID returned by Gemini (e.g. "p0001", "P1", "[P0001]", "#P0001", "1", "title")
+ * against the set of expected raw block IDs ("TITLE", "P0001", "P0002"...).
+ */
+export function normalizeReturnedBlockId(
+  rawId: string,
+  expectedIdSet?: Set<string>
+): string {
+  const trimmed = String(rawId || '').trim();
+  if (!trimmed) return '';
+  if (expectedIdSet?.has(trimmed)) return trimmed;
+
+  const clean = trimmed
+    .replace(/^[\[\(#\s]+|[\]\)\s:.-]+$/g, '')
+    .trim()
+    .toUpperCase();
+  if (!clean) return '';
+  if (expectedIdSet?.has(clean)) return clean;
+
+  if (
+    clean === 'TITLE' ||
+    clean === 'TIÊU ĐỀ' ||
+    clean === 'TIEU DE' ||
+    clean === 'CH_TITLE' ||
+    clean === 'CHAPTER_TITLE' ||
+    clean === 'HEADER' ||
+    clean === 'P0' ||
+    clean === 'P0000' ||
+    clean === '0' ||
+    clean === '0000'
+  ) {
+    if (!expectedIdSet || expectedIdSet.has('TITLE')) {
+      return 'TITLE';
+    }
+  }
+
+  const numMatch = clean.match(
+    /^(?:P|BLOCK|PARA|PARAGRAPH|ĐOẠN|DOAN|LINE|ID)?[-_\s#]*0*(\d+)$/i
+  );
+  if (numMatch) {
+    const num = parseInt(numMatch[1], 10);
+    if (Number.isInteger(num) && num > 0) {
+      const candidate = `P${String(num).padStart(4, '0')}`;
+      if (!expectedIdSet || expectedIdSet.has(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
+  return trimmed;
+}
+
+/**
+ * Extracts clean single-paragraph translated text from a raw block object returned by the model,
+ * supporting fallback field names (`translation`, `text`, `content`, `vi`) in case the model
+ * deviates slightly on long chapters.
+ */
+function extractBlockTranslationField(item: Record<string, unknown>): string {
+  const rawVal =
+    typeof item.translation === 'string'
+      ? item.translation
+      : typeof item.text === 'string'
+        ? item.text
+        : typeof item.content === 'string'
+          ? item.content
+          : typeof item.vi === 'string'
+            ? item.vi
+            : '';
+  return rawVal.replace(/\u200B/g, '').replace(/\r?\n+/g, ' ').trim();
+}
+
+/**
+ * Extracts raw block ID string from a returned block object, supporting fallback field names
+ * (`id`, `blockId`, `block_id`).
+ */
+function extractBlockIdField(item: Record<string, unknown>): string {
+  if (typeof item.id === 'string' || typeof item.id === 'number') {
+    return String(item.id);
+  }
+  if (typeof item.blockId === 'string' || typeof item.blockId === 'number') {
+    return String(item.blockId);
+  }
+  if (typeof item.block_id === 'string' || typeof item.block_id === 'number') {
+    return String(item.block_id);
+  }
+  return '';
+}
+
+/**
  * Materialize an array of `{ id, translation }` blocks returned by Gemini (blocks-v1)
  * in strict raw block ID order, validating missing/duplicate/empty/unexpected blocks
  * and preserving 1:1 slot indices so missing/empty blocks never shift subsequent paragraphs.
  */
 export function materializeBlocksToChapter(
-  returnedBlocks: { id: string; translation: string }[],
+  returnedBlocks: Array<{
+    id?: string;
+    translation?: string;
+    [key: string]: unknown;
+  }>,
   expectedRawBlocks: TranslationBlock[],
   chapterNumber: number
 ): {
@@ -130,18 +222,17 @@ export function materializeBlocksToChapter(
   const emptyIds: string[] = [];
   const unexpectedIds: string[] = [];
 
-  for (const item of returnedBlocks || []) {
-    if (!item || typeof item.id !== 'string') continue;
-    const id = item.id.trim();
+  for (const rawItem of returnedBlocks || []) {
+    if (!rawItem || typeof rawItem !== 'object') continue;
+    const item = rawItem as Record<string, unknown>;
+    const rawId = extractBlockIdField(item);
+    const id = normalizeReturnedBlockId(rawId, expectedIdSet);
     if (!id) continue;
     if (!expectedIdSet.has(id)) {
       unexpectedIds.push(id);
       continue;
     }
-    const text =
-      typeof item.translation === 'string'
-        ? item.translation.replace(/\u200B/g, '').replace(/\r?\n+/g, ' ').trim()
-        : '';
+    const text = extractBlockTranslationField(item);
     if (map.has(id)) {
       duplicateIds.push(id);
     }
@@ -151,6 +242,48 @@ export function materializeBlocksToChapter(
     // Keep the first non-empty translation if duplicated, or latest non-empty
     if (!map.has(id) || (!map.get(id) && text)) {
       map.set(id, text);
+    }
+  }
+
+  const expectedBodyBlocks = expectedRawBlocks.filter((b) => b.id !== 'TITLE');
+
+  // Positional fallback ONLY if 0 body blocks matched by ID (e.g. model used arbitrary IDs)
+  // AND the returned array has the exact same length as expectedRawBlocks or expectedBodyBlocks
+  const matchedBodyBeforeFallback = expectedBodyBlocks.filter((b) =>
+    Boolean((map.get(b.id) || '').trim())
+  ).length;
+
+  if (
+    matchedBodyBeforeFallback === 0 &&
+    Array.isArray(returnedBlocks) &&
+    returnedBlocks.length > 0 &&
+    expectedBodyBlocks.length > 0
+  ) {
+    const validTexts = returnedBlocks.map((rawItem) =>
+      rawItem && typeof rawItem === 'object'
+        ? extractBlockTranslationField(rawItem as Record<string, unknown>)
+        : ''
+    );
+    const nonEmptyValidTexts = validTexts.filter(Boolean).length;
+
+    if (nonEmptyValidTexts > 0) {
+      if (returnedBlocks.length === expectedRawBlocks.length) {
+        unexpectedIds.length = 0;
+        emptyIds.length = 0;
+        expectedRawBlocks.forEach((b, idx) => {
+          const text = validTexts[idx] || '';
+          map.set(b.id, text);
+          if (!text) emptyIds.push(b.id);
+        });
+      } else if (returnedBlocks.length === expectedBodyBlocks.length) {
+        unexpectedIds.length = 0;
+        emptyIds.length = 0;
+        expectedBodyBlocks.forEach((b, idx) => {
+          const text = validTexts[idx] || '';
+          map.set(b.id, text);
+          if (!text) emptyIds.push(b.id);
+        });
+      }
     }
   }
 
@@ -166,7 +299,6 @@ export function materializeBlocksToChapter(
     titleTranslated = `Chương ${chapterNumber}`;
   }
 
-  const expectedBodyBlocks = expectedRawBlocks.filter((b) => b.id !== 'TITLE');
   const bodySlotTranslations: string[] = [];
   let nonEmptyBodyCount = 0;
 
@@ -365,19 +497,23 @@ export function extractDirtyBlockTargets(
  */
 export function applyBlockUpdatesToChapter(
   allPairs: AlignedBlockPair[],
-  updates: { id: string; translation: string }[],
+  updates: Array<{ id?: string; translation?: string; [key: string]: unknown }>,
   fallbackTitle: string
 ): {
   titleTranslated: string;
   translatedContent: string;
   alignment: ChapterAlignment;
 } {
+  const expectedIdSet = new Set(allPairs.map((p) => p.id));
   const updateMap = new Map<string, string>();
-  for (const u of updates || []) {
-    if (u && typeof u.id === 'string' && typeof u.translation === 'string') {
-      const trimmed = u.translation.trim();
-      if (trimmed) {
-        updateMap.set(u.id.trim(), trimmed);
+  for (const rawU of updates || []) {
+    if (rawU && typeof rawU === 'object') {
+      const u = rawU as Record<string, unknown>;
+      const rawId = extractBlockIdField(u);
+      const id = normalizeReturnedBlockId(rawId, expectedIdSet);
+      const trimmed = extractBlockTranslationField(u);
+      if (id && trimmed) {
+        updateMap.set(id, trimmed);
       }
     }
   }

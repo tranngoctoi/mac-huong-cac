@@ -713,10 +713,14 @@ export function scanChapterQA(
   let leakedEnglishCount = 0;
   let glossaryViolationCount = 0;
 
+  const cleanTranslatedBody = (chapter.translatedContent || '')
+    .replace(/\u200B/g, '')
+    .trim();
+
   const isTranslatedOrEdited =
     chapter.status === 'translated' ||
     chapter.status === 'edited' ||
-    Boolean(chapter.translatedContent && chapter.translatedContent.trim().length > 0);
+    cleanTranslatedBody.length > 0;
 
   if (!isTranslatedOrEdited) {
     return {
@@ -738,7 +742,7 @@ export function scanChapterQA(
     };
   }
 
-  const titleTrimmed = (chapter.titleTranslated || '').trim();
+  const titleTrimmed = (chapter.titleTranslated || '').replace(/\u200B/g, '').trim();
   const titleHasChinese = CJK_REGEX.test(titleTrimmed);
   CJK_REGEX.lastIndex = 0;
 
@@ -791,7 +795,7 @@ export function scanChapterQA(
     }
   }
 
-  const translatedBody = (chapter.translatedContent || '').trim();
+  const translatedBody = cleanTranslatedBody;
   const rawBody = (chapter.rawContent || '').trim();
 
   // Check Block / Paragraph Count Alignment

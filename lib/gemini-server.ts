@@ -489,7 +489,12 @@ class ServerGeminiKeyPool {
   public async executeWithKeyRotation<T>(
     operation: (
       ai: GoogleGenAI,
-      slotInfo: { keyIndex: number; totalKeys: number; activeModel: string }
+      slotInfo: {
+        keyIndex: number;
+        totalKeys: number;
+        activeModel: string;
+        attemptIndex: number;
+      }
     ) => Promise<T>,
     model?: string,
     fallbackModel?: string,
@@ -499,6 +504,7 @@ class ServerGeminiKeyPool {
       label?: string;
       signal?: AbortSignal;
       initialTriedKeys?: number[];
+      allowWireRenewal?: boolean;
     }
   ): Promise<{
     result: T;
@@ -538,8 +544,9 @@ class ServerGeminiKeyPool {
     let lastError: unknown = null;
     let sawRateLimitOnAllAttempts = false;
 
-    const PER_KEY_ATTEMPT_TIMEOUT_MS = 180_000; // 180s max per key so a hung socket never hits 300s
-    const MAX_WIRE1_ELAPSED_BEFORE_RENEW_MS = 20_000; // Renew Sợi dây 1 if >= 20s already spent on this HTTP connection
+    const PER_KEY_ATTEMPT_TIMEOUT_MS = 240_000; // 240s max per key so 10,000+ char chapters finish cleanly in 1 request
+    const MAX_WIRE1_ELAPSED_BEFORE_RENEW_MS = 90_000; // Renew Sợi dây 1 only if >= 90s already spent on this HTTP connection
+    const allowWireRenewal = traceContext?.allowWireRenewal !== false;
 
     for (let mIdx = 0; mIdx < modelsToTry.length; mIdx++) {
       const targetModel = modelsToTry[mIdx];
@@ -572,10 +579,11 @@ class ServerGeminiKeyPool {
           break;
         }
 
-        // Cách 1: If this HTTP connection (Sợi dây 1) has already been open >= 20s and we need to switch to a new key,
+        // Cách 1: If this HTTP connection (Sợi dây 1) has already been open >= 90s and we need to switch to a new key,
         // close Sợi dây 1 and tell the browser to immediately open a brand-new Sợi dây 1 (resetting the 300s clock to 0s)!
         const elapsedOnWireMs = Date.now() - opStartMs;
         if (
+          allowWireRenewal &&
           attempts.length > 0 &&
           elapsedOnWireMs >= MAX_WIRE1_ELAPSED_BEFORE_RENEW_MS &&
           (this.hasAnyReadySlotForModel(targetModel, triedIndices) ||
@@ -674,6 +682,7 @@ class ServerGeminiKeyPool {
               keyIndex: slot.index,
               totalKeys,
               activeModel: targetModel,
+              attemptIndex: attempt,
             }).then(resolve, reject);
           });
           const latencyMs = Date.now() - startMs;
@@ -819,15 +828,24 @@ class ServerGeminiKeyPool {
             continue;
           }
 
-          // Transient server/network/timeout errors (500, 502, 503, 504, overloaded, fetch failed, socket hang, per-attempt timeout):
-          // put key on short cooldown and rotate to another idle key (renewing Sợi dây 1 if >= 20s elapsed)
+          // Transient server/network/timeout/output errors (500, 502, 503, 504, overloaded, fetch failed, socket hang, per-attempt timeout, or empty/truncated output):
+          // put key on short cooldown and rotate to another idle key
           const isTransientOrTimeout =
             msg.includes('[KEY_ATTEMPT_TIMEOUT]') ||
+            msg.includes('[EMPTY_STRUCTURED_OUTPUT]') ||
+            msg.includes('[TRUNCATED_JSON_OUTPUT]') ||
+            msg.includes('[INTERACTION_ERROR]') ||
+            msg.includes('[INTERACTION_FAILED]') ||
+            msg.includes('[INTERACTION_CANCELLED]') ||
+            msg.includes('[INTERACTION_INCOMPLETE]') ||
+            msg.includes('[INVALID_STRUCTURED_OUTPUT]') ||
             msg.includes('503') ||
             msg.includes('502') ||
             msg.includes('504') ||
+            msg.includes('500') ||
             msg.includes('UNAVAILABLE') ||
             msg.includes('DEADLINE_EXCEEDED') ||
+            msg.includes('INTERNAL') ||
             msg.includes('UND_ERR_') ||
             lower.includes('overloaded') ||
             lower.includes('internal error') ||
@@ -835,7 +853,8 @@ class ServerGeminiKeyPool {
             lower.includes('network') ||
             lower.includes('timeout') ||
             lower.includes('socket hang up') ||
-            lower.includes('econnreset');
+            lower.includes('econnreset') ||
+            lower.includes(' terminated');
 
           if (isTransientOrTimeout) {
             const transientCooldownMs = msg.includes('[KEY_ATTEMPT_TIMEOUT]')
@@ -1238,6 +1257,16 @@ export const MANDATORY_INTERACTION_GENERATION_CONFIG = {
   max_output_tokens: 65536,
 };
 
+/**
+ * Request options passed to `ai.interactions.create(params, DEFAULT_INTERACTION_REQUEST_OPTIONS)`
+ * so @google/genai's internal Speakeasy client does not silently retry a rate-limited (429) key
+ * 4 times for 20+ seconds before returning control to `geminiKeyPool.executeWithKeyRotation`.
+ */
+export const DEFAULT_INTERACTION_REQUEST_OPTIONS = {
+  maxRetries: 0,
+  timeout: 240_000,
+};
+
 const VALID_THINKING_LEVELS: readonly ThinkingLevelOption[] = [
   'minimal',
   'low',
@@ -1589,20 +1618,35 @@ export function buildGlossaryExtractResponseFormat(
  * Extracts output text from a Gemini Interactions API response (`ai.interactions.create`).
  * - Validates `interaction.status` and `interaction.errors` first so `failed`, `cancelled`, or `incomplete`
  *   interactions throw an explicit error rather than silently returning empty/partial text.
- * - Strictly extracts text from `model_output` steps (never mixing `thought` reasoning steps),
- *   falling back to `interaction.output_text`.
+ * - Extracts text from `interaction.steps` (`model_output` steps, ignoring `thought` reasoning steps),
+ *   AND `interaction.outputs` (for `v1beta/interactions` responses where `@google/genai`'s `normalizeInteractionShape`
+ *   sets `steps: []` on non-Lyria models and leaves the payload in `outputs`),
+ *   falling back to `interaction.output_text`, `interaction.text`, and `interaction.candidates`.
  */
 export function extractInteractionText(
   interaction: {
     status?: string | null;
     errors?: Array<{ code?: string | number; message?: string }> | null;
     output_text?: string | null;
+    text?: string | null;
     steps?: Array<{
       type?: string;
       finish_reason?: string;
       content?:
         | Array<{ type?: string; text?: string }>
         | { type?: string; text?: string };
+    }>;
+    outputs?: Array<{
+      type?: string;
+      text?: string;
+      content?:
+        | Array<{ type?: string; text?: string }>
+        | { type?: string; text?: string };
+    }>;
+    candidates?: Array<{
+      content?: {
+        parts?: Array<{ text?: string; thought?: boolean }>;
+      };
     }>;
   },
   contextLabel = 'InteractionOutput'
@@ -1633,10 +1677,9 @@ export function extractInteractionText(
     );
   }
 
-  // Prefer concatenating all chronological `model_output` steps (as recommended by @google/genai Interactions docs
-  // so multi-step outputs are never truncated to only the trailing step, while strictly ignoring `thought` steps)
+  // 1. Prefer concatenating all chronological `model_output` steps (strictly ignoring `thought` steps)
   let extractedText = '';
-  if (Array.isArray(interaction?.steps)) {
+  if (Array.isArray(interaction?.steps) && interaction.steps.length > 0) {
     const chunks: string[] = [];
     for (const step of interaction.steps) {
       if (step?.type === 'model_output' && step.content) {
@@ -1644,7 +1687,10 @@ export function extractInteractionText(
           ? step.content
           : [step.content];
         for (const item of items) {
-          if (item?.type === 'text' && typeof item.text === 'string') {
+          if (
+            (item?.type === 'text' || !item?.type) &&
+            typeof item?.text === 'string'
+          ) {
             chunks.push(item.text);
           }
         }
@@ -1655,12 +1701,66 @@ export function extractInteractionText(
     }
   }
 
+  // 2. Check `interaction.outputs` (in @google/genai 2.31.0, `normalizeInteractionShape` sets `steps: []`
+  // for non-Lyria models when the v1beta/interactions wire response returns `outputs: [...]`)
+  if (!extractedText.trim() && Array.isArray(interaction?.outputs)) {
+    const outChunks: string[] = [];
+    for (const out of interaction.outputs) {
+      if (!out || out.type === 'thought') continue;
+      if (typeof out.text === 'string' && out.text) {
+        outChunks.push(out.text);
+      } else if (out.content) {
+        const items = Array.isArray(out.content) ? out.content : [out.content];
+        for (const item of items) {
+          if (
+            item &&
+            item.type !== 'thought' &&
+            typeof item.text === 'string' &&
+            item.text
+          ) {
+            outChunks.push(item.text);
+          }
+        }
+      }
+    }
+    if (outChunks.length > 0) {
+      extractedText = outChunks.join('');
+    }
+  }
+
+  // 3. Fallback to `output_text` or `text`
   if (
     !extractedText.trim() &&
     typeof interaction?.output_text === 'string' &&
     interaction.output_text.trim()
   ) {
     extractedText = interaction.output_text;
+  }
+
+  if (
+    !extractedText.trim() &&
+    typeof interaction?.text === 'string' &&
+    interaction.text.trim()
+  ) {
+    extractedText = interaction.text;
+  }
+
+  // 4. Fallback to `candidates` (in case a response envelope includes standard GenerateContent candidates)
+  if (!extractedText.trim() && Array.isArray(interaction?.candidates)) {
+    const candChunks: string[] = [];
+    for (const cand of interaction.candidates) {
+      const parts = cand?.content?.parts;
+      if (Array.isArray(parts)) {
+        for (const part of parts) {
+          if (part && part.thought !== true && typeof part.text === 'string') {
+            candChunks.push(part.text);
+          }
+        }
+      }
+    }
+    if (candChunks.length > 0) {
+      extractedText = candChunks.join('');
+    }
   }
 
   if (status === 'incomplete') {
@@ -1676,6 +1776,55 @@ export function extractInteractionText(
   }
 
   return extractedText;
+}
+
+/**
+ * Extracts the array of returned block objects from a parsed JSON response,
+ * supporting `{ blocks: [...] }`, `{ updates: [...] }`, `{ data: [...] }`, `{ items: [...] }`,
+ * or a direct top-level array `[...]`.
+ */
+export function extractBlocksArrayFromParsedJson(
+  parsed: unknown
+): Array<{ id?: string; translation?: string; [key: string]: unknown }> {
+  if (Array.isArray(parsed)) {
+    return parsed as Array<{
+      id?: string;
+      translation?: string;
+      [key: string]: unknown;
+    }>;
+  }
+  if (parsed && typeof parsed === 'object') {
+    const obj = parsed as Record<string, unknown>;
+    if (Array.isArray(obj.blocks)) {
+      return obj.blocks as Array<{
+        id?: string;
+        translation?: string;
+        [key: string]: unknown;
+      }>;
+    }
+    if (Array.isArray(obj.updates)) {
+      return obj.updates as Array<{
+        id?: string;
+        translation?: string;
+        [key: string]: unknown;
+      }>;
+    }
+    if (Array.isArray(obj.data)) {
+      return obj.data as Array<{
+        id?: string;
+        translation?: string;
+        [key: string]: unknown;
+      }>;
+    }
+    if (Array.isArray(obj.items)) {
+      return obj.items as Array<{
+        id?: string;
+        translation?: string;
+        [key: string]: unknown;
+      }>;
+    }
+  }
+  return [];
 }
 
 /**

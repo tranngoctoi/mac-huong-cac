@@ -1,260 +1,294 @@
-# Cẩm Nang Vận Hành Toàn Diện — Mặc Hương Các Studio
+# CẨM NANG HƯỚNG DẪN SỬ DỤNG TOÀN DIỆN — MẶC HƯƠNG CÁC STUDIO
 
-Chào mừng bạn đến với **Mặc Hương Các Studio** — không gian làm việc tích hợp chuyên biệt dành cho dịch giả, biên tập viên và độc giả tiểu thuyết Trung - Việt (Tiên hiệp, Huyền huyễn, Khoa huyễn, Đô thị, Võng du, Lịch sử, Cổ đại, Đam mỹ, Ngôn tình, Dị giới...).
+Chào mừng bạn đến với **Mặc Hương Các Studio** — Hệ thống biên dịch, biên tập song ngữ theo từng đoạn (**1:1 Block-ID**), kiểm định chất lượng (QA), đọc truyện và đóng gói xuất bản **W3C EPUB 3.3** chuyên sâu dành cho tiểu thuyết chữ Hán – Việt.
 
-Tài liệu này được cập nhật đồng bộ 100% với luồng hoạt động thực tế của hệ thống: từ quản lý **Thư viện truyện kèm Biểu đồ tiến độ 3 tầng**, **Nhập liệu đa định dạng & Nhập bản dịch ngoài 1:1**, **Mức độ suy luận AI (`Thinking Level`: `minimal` • `low` • `medium` • `high` — mặc định `high`)**, **Bể 50 API Key lưu bền vững vào dự án**, **Quét dựng Từ điển Tiền kỳ Đa luồng (Pre-Scan)**, **Hàng đợi Dịch & Biên tập AI Đa luồng (Tạm dừng / Tiếp tục / Dừng hẳn)**, **Biên tập Song ngữ 1:1 khóa dòng Block-ID (`TITLE`, `P0001`..`Pxxxx`)**, **Kiểm định chất lượng QA đa tiêu chí**, **Chế độ Đọc sạch (Justify)** đến **Đóng gói sách điện tử EPUB 3.3 & Sao lưu Dự án `.ZIP` (Backup v5)**.
+Tài liệu này hướng dẫn chi tiết từng bước từ lúc khởi tạo bộ truyện, thiết lập 50 khóa Gemini API chạy 10 luồng song song, chống đứt cáp 300s (Sợi dây 1 Heartbeat & Renewal), nạp chương nguyên tác, xây dựng Từ điển tên riêng (Glossary), dịch tự động, biên tập theo mã đoạn `P0001..Pxxxx`, cho đến đọc truyện và xuất sách điện tử.
 
 ---
 
 ## MỤC LỤC NHANH
-1. [Quy Trình Nhanh 5 Bước & Kiến Trúc Không Gian Làm Việc](#1-quy-trình-nhanh-5-bước--kiến-trúc-không-gian-làm-việc)
-2. [Thư Viện Truyện & Bảng Điều Khiển Tiến Độ Toàn Thư Viện](#2-thư-viện-truyện--bảng-điều-khiển-tiến-độ-toàn-thư-viện)
-3. [Nhập Chương Nguyên Tác (4 Nguồn) & Nhập Bản Dịch Ngoài (.TXT 1:1)](#3-nhập-chương-nguyên-tác-4-nguồn--nhập-bản-dịch-ngoài-txt-11)
-4. [Cấu Hình Model Alias, Mức Suy Luận (`Thinking Level`), Bể 50 Key & Chẩn Đoán](#4-cấu-hình-model-alias-mức-suy-luận-thinking-level-bể-50-key--chẩn-đoán)
-5. [Chỉ Dẫn Dịch Thuật (Preset), Từ Điển (Glossary) & Quét Tiền Kỳ Đa Luồng (Pre-Scan)](#5-chỉ-dẫn-dịch-thuật-preset-từ-điển-glossary--quét-tiền-kỳ-đa-luồng-pre-scan)
-6. [Hàng Đợi Dịch & Biên Tập AI Đa Luồng (1x–10x, Pause / Resume / Hard Stop)](#6-hàng-đợi-dịch--biên-tập-ai-đa-luồng-1x10x-pause--resume--hard-stop)
-7. [Biên Tập Song Ngữ 1:1 Khóa Dòng Block-ID & Trợ Lý AI Tinh Chỉnh](#7-biên-tập-song-ngữ-11-khóa-dòng-block-id--trợ-lý-ai-tinh-chỉnh)
-8. [Kiểm Định Chất Lượng Đa Tiêu Chí (QA Scanner) & Tìm / Thay Thế Toàn Văn](#8-kiểm-định-chất-lượng-đa-tiêu-chí-qa-scanner--tìm--thay-thế-toàn-văn)
-9. [Chế Độ Đọc Sạch (Justify), Màu HEX/RGB, Font Cá Nhân & Sổ Tay Highlight](#9-chế-độ-đọc-sạch-justify-màu-hexrgb-font-cá-nhân--sổ-tay-highlight)
-10. [Xuất Sách Điện Tử EPUB 3.3, ZIP TXT, TXT Gộp & Sao Lưu Dự Án `.ZIP` (Backup v5)](#10-xuất-sách-điện-tử-epub-33-zip-txt-txt-gộp--sao-lưu-dự-án-zip-backup-v5)
-11. [System Terminal Thời Gian Thực (`Ctrl + \``) & Bảng Phím Tắt Toàn Cục](#11-system-terminal-thời-gian-thực-ctrl----bảng-phím-tắt-toàn-cục)
+1. [Tổng quan giao diện bàn làm việc](#1-tổng-quan-giao-diện-bàn-làm-việc)
+2. [Quản lý Thư viện Đa Bộ Truyện & Bảng Tiến Độ](#2-quản-lý-thư-viện-đa-bộ-truyện--bảng-tiến-độ)
+3. [Cấu hình AI: Preset Dịch, Preset Biên Tập, Model & Pool 50 API Keys](#3-cấu-hình-ai-preset-dịch-preset-biên-tập-model--pool-50-api-keys)
+4. [Nhập chương nguyên tác (Raw) & Nhập bản dịch có sẵn](#4-nhập-chương-nguyên-tác-raw--nhập-bản-dịch-có-sẵn)
+5. [Xây dựng Từ điển Tên riêng (Glossary) & Quét AI tự động (Pre-Scan)](#5-xây-dựng-từ-điển-tên-riêng-glossary--quét-ai-tự-động-pre-scan)
+6. [Dịch hàng loạt đa luồng (1x–10x) & Hàng đợi Biên tập AI](#6-dịch-hàng-loạt-đa-luồng-1x10x--hàng-đợi-biên-tập-ai)
+7. [Bàn Biên Tập Song Ngữ 1:1 Block-ID (`TITLE`, `P0001`..`Pxxxx`)](#7-bàn-biên-tập-song-ngữ-11-block-id-title-p0001pxxxx)
+8. [Kiểm định chất lượng tự động (QA Scanner) & Tìm/Thay thế Toàn văn](#8-kiểm-định-chất-lượng-tự-động-qa-scanner--tìmthay-thế-toàn-văn)
+9. [Chế độ Đọc Truyện (Clean Justified Reader), Highlight & Bookmark](#9-chế-độ-đọc-truyện-clean-justified-reader-highlight--bookmark)
+10. [Xuất sách điện tử W3C EPUB 3.3, Tệp Gộp `.TXT` & Sao lưu `.ZIP` v5](#10-xuất-sách-điện-tử-w3c-epub-33-tệp-gộp-txt--sao-lưu-zip-v5)
+11. [Trạm Giám Sát Hệ Thống (System Terminal Drawer)](#11-trạm-giám-sát-hệ-thống-system-terminal-drawer)
+12. [Phím tắt bàn phím & Mẹo xử lý sự cố thường gặp](#12-phím-tắt-bàn-phím--mẹo-xử-lý-sự-cố-thường-gặp)
 
 ---
 
-## 1. Quy Trình Nhanh 5 Bước & Kiến Trúc Không Gian Làm Việc
+## 1. Tổng quan giao diện bàn làm việc
 
-### 1.1. Quy trình nhanh 5 bước cho người mới bắt đầu
-1. **Bước 1 — Chọn hoặc Tạo bộ truyện**: Nhấn nút **Thư Viện** trên thanh công cụ trên cùng để chọn bộ mẫu có sẵn (*Phàm Nhân Tu Tiên*, *Đạo Quỷ Dị Tiên*, *Quỷ Bí Chi Chủ*) hoặc tạo dự án truyện mới.
-2. **Bước 2 — Nhập chương nguyên tác**: Nhấn **Nhập Chương** để nạp hàng trăm file `.txt`, sách `.epub`, tách 1 file `.txt` gộp bằng Regex, hoặc tải trực tiếp từ URL.
-3. **Bước 3 — Thiết lập Preset, Mức suy luận (`Thinking Level`) & Key Pool**: Mở **Preset & Model** để chọn bộ chỉ dẫn dịch (*Flash Đa Thể Loại v1.14.0* hoặc *Biên Tập AI*), chọn mức suy luận (`minimal` / `low` / `medium` / `high` — mặc định `high`), và nạp danh sách API Key (tối đa 50 Key) nếu chạy đa luồng tốc độ cao.
-4. **Bước 4 — Quét Từ Điển (tùy chọn) & Chạy Hàng Đợi Dịch / Biên Tập**: Tick chọn các chương ở cột trái -> chọn số luồng (`1x`–`10x`) -> nhấn **Dịch Đã Chọn** hoặc **Biên Tập Đã Chọn**.
-5. **Bước 5 — Rà soát 1:1, Đọc & Xuất sách**: Chỉnh sửa chi tiết trên bảng **Biên tập bản dịch 1:1**, kiểm tra ở chế độ **Đọc**, và nhấn **Xuất & Sao lưu** để tải sách `.EPUB 3.3` hoặc gói sao lưu `.ZIP` (Backup v5).
+Giao diện **Mặc Hương Các Studio** được thiết kế theo phong cách giấy cổ điển ấm áp (*Warm Archival Paper*), giảm mỏi mắt khi làm việc nhiều giờ liên tục, chia làm **4 khu vực chính**:
 
-### 1.2. Kiến trúc 2 Chế Độ Trung Tâm & Tự Động Cuộn Đầu Chương
-Giao diện chính được tinh giản tối đa vào 2 chế độ chuyển đổi tức thì ở chính giữa thanh công cụ trên cùng:
-- **Biên tập bản dịch (1:1 Block-ID)**: Bảng song ngữ khóa dòng 1:1 giữa nguyên bản tiếng Trung và bản dịch tiếng Việt (`TITLE`, `P0001`, `P0002`...), kèm khung nhập tự giãn chiều cao, thanh công cụ ghim cố định và bộ công cụ căn chỉnh đoạn văn.
-- **Đọc (Clean Justified Reader)**: Trình đọc sách chuyên nghiệp căn đều hai lề (`justify`), hỗ trợ tùy biến màu nền/màu chữ HEX/RGB, nạp font cá nhân (`.ttf/.otf/.woff2`), đánh dấu Highlight 3 màu kèm ghi chú và lưu vị trí đọc (Bookmark).
-- **Tự động cuộn lên đầu chương (`Scroll-to-Top`)**: Mỗi khi bạn chuyển đổi sang chương khác (bằng danh sách bên trái, menu thả xuống hay nút *Chương trước / Chương tiếp*), cả khung **Biên tập bản dịch** lẫn khung **Đọc** đều tự động cuộn mượt về đầu chương (`scrollTop = 0`), đồng thời giữ chương đang chọn luôn nằm trong vùng nhìn thấy ở cột mục lục bên trái.
+1. **Thanh điều hướng trên cùng (Top Header Bar)**:
+   - **Thư Viện (`N` bộ)**: Mở kho quản lý tất cả các bộ truyện, xem biểu đồ tròn tiến độ dịch và chuyển đổi nhanh giữa các dự án.
+   - **Preset & Model** *(hiển thị tên Model hiện hành + số lượng Keys trong Pool + mức Thinking Level)*: Mở cửa sổ thiết lập Chỉ dẫn dịch thuật, Chỉ dẫn biên tập AI, chọn Model AI, mức độ suy luận (*Thinking Level*) và nạp danh sách tối đa **50 API Keys**.
+   - **Glossary (`N`)**: Mở bảng Từ điển tên riêng của bộ truyện đang chọn.
+   - **Nhập Raw**: Mở công cụ nạp chương nguyên tác chữ Hán (từ tệp `.TXT`, gói `.ZIP`, dán văn bản trực tiếp hoặc tải từ URL).
+   - **EPUB & Backup**: Mở trung tâm đóng gói sách điện tử **EPUB 3.3**, xuất tệp `.TXT` và sao lưu toàn bộ dự án ra gói `.ZIP` v5.
+   - **Hướng Dẫn**: Mở nhanh cẩm nang hướng dẫn sử dụng ngay trong ứng dụng.
+   - **Terminal**: Bật/tắt ngăn kéo giám sát nhật ký hệ thống và trạng thái từng API Key theo thời gian thực.
 
----
+2. **Cột danh sách chương bên trái (Chapter Sidebar — có thể thu gọn)**:
+   - Hiển thị thông tin tóm tắt bộ truyện hiện tại, nút bấm nhanh vào **Tiến độ** và **Đọc tiếp Bookmark**.
+   - Thanh tìm kiếm chương nhanh, nút mở công cụ **Toàn văn** (Tìm & Thay thế trên toàn bộ các chương) và nút **Tạo chương trắng mới (`+`)**.
+   - Bộ lọc trạng thái chương: `Tất cả`, `Chưa dịch`, `Đã dịch`, `Đã duyệt`, `Có cảnh báo QA`, `Đánh dấu (Bookmark)`.
+   - **Thanh điều khiển Hàng đợi Đa luồng (`1x` – `10x`)**: Cho phép chọn nhiều chương (hoặc chọn nhanh một dải chương từ chương `A` đến chương `B`) để chạy **Dịch (`N`)** hoặc **Biên tập AI (`N`)** song song.
 
-## 2. Thư Viện Truyện & Bảng Điều Khiển Tiến Độ Toàn Thư Viện
+3. **Không gian làm việc trung tâm (Main Workspace)**:
+   - Chuyển đổi linh hoạt giữa 2 chế độ bằng nút **Đọc / Biên tập** trên thanh công cụ chương:
+     - **Chế độ Biên tập (Editor Mode)**: Hỗ trợ 2 kiểu hiển thị:
+       - **Song ngữ 1:1 Block-ID (`TITLE`, `P0001`..`Pxxxx`)**: Hiển thị từng đoạn nguyên tác chữ Hán bên trái khớp chính xác 1:1 với ô đoạn dịch tiếng Việt bên phải.
+       - **Soạn thảo thuần (Plain Textarea)**: Hiển thị hai cột văn bản liền mạch kèm bộ công cụ trợ lý AI cho đoạn văn bôi đen.
+     - **Chế độ Đọc truyện (Clean Justified Reader)**: Trình đọc sách điện tử căn đều hai bên (`text-align: justify`), ẩn toàn bộ chữ Hán và công cụ kỹ thuật để thưởng thức tác phẩm trọn vẹn.
 
-Nhấn nút **Thư Viện** ở góc trái trên cùng để mở trung tâm quản lý toàn bộ dự án truyện:
-
-### 2.1. Bảng Điều Khiển Tiến Độ Toàn Thư Viện (Biểu Đồ Tròn Donut 3 Tầng)
-Ngay đầu cửa sổ Thư Viện là bảng tổng hợp trực quan cho cả **Toàn bộ thư viện** lẫn **Từng bộ truyện**:
-- **Biểu đồ tròn Donut 3 tầng màu**:
-  - **Màu Xanh Ngọc (`#1E6F50`) — Đã biên tập / Đã duyệt**: Số chương đã hoàn thiện biên tập và kiểm duyệt.
-  - **Màu Hổ Phách (`#D97706`) — Đã dịch (Chưa duyệt)**: Số chương đã có bản dịch tiếng Việt nhưng chưa qua bước duyệt biên tập.
-  - **Màu Xám Giấy (`#D6CFC2`) — Chưa dịch (Nguyên bản)**: Số chương mới nạp nguyên tác tiếng Trung.
-- Hiển thị đầy đủ tỷ lệ phần trăm hoàn thành toàn thư viện, tổng số chương, tổng số từ tiếng Việt, số mục thuật ngữ Từ điển và số chương đạt chuẩn QA sạch 100%.
-
-### 2.2. Chế Độ Xem Thẻ (Card View) & Bảng Ma Trận (Table View)
-- **Tìm kiếm, Lọc & Sắp xếp**: Tìm theo tên truyện, tên Hán tự, tác giả, thể loại; lọc theo trạng thái (*Tất cả*, *Đã ghim ⭐*, *Đang dịch dở*, *Hoàn thành 100%*, *Chưa dịch*); sắp xếp theo *Mới cập nhật*, *Tiến độ dịch %*, *Tổng số chương*, *Số lượng từ*, hoặc *Tên A-Z*.
-- **Thao tác quản trị trên từng bộ truyện**:
-  - **Ghim ưu tiên (⭐)**: Đưa bộ truyện đang làm việc lên đầu danh sách.
-  - **Sửa thông tin & Ảnh bìa**: Cập nhật tên tiếng Việt, tên nguyên tác, tác giả, thể loại, mô tả tóm tắt và tải ảnh bìa (dùng làm bìa sách EPUB 3.3).
-  - **Nhân bản (Clone)**: Sao chép toàn bộ chương, từ điển và thiết lập sang một bản sao độc lập để thử nghiệm văn phong dịch mới.
-  - **Khôi phục Dự án từ gói `.ZIP` (Backup v5)**: Nạp trực tiếp file `.zip` sao lưu để khôi phục nguyên trạng bộ truyện từ máy khác.
+4. **Thanh công cụ & Ngăn kéo phụ trợ (QA, Lịch sử Revision, Terminal)**:
+   - Hiển thị báo cáo kiểm định chất lượng (QA), lịch sử các bản lưu (*Revisions*) của chương hiện tại và bảng điều khiển tùy biến giao diện đọc sách.
 
 ---
 
-## 3. Nhập Chương Nguyên Tác (4 Nguồn) & Nhập Bản Dịch Ngoài (.TXT 1:1)
+## 2. Quản lý Thư viện Đa Bộ Truyện & Bảng Tiến Độ
 
-### 3.1. Nhập Chương Nguyên Tác (Nút `Nhập Chương` ở cột trái)
-Hỗ trợ **4 phương thức nhập liệu thông minh**, tự động cấp mã thứ tự 4 chữ số (`0000`, `0001`, `0002`...) để không bao giờ đảo lộn thứ tự chương:
-1. **Tab 1 — Thư mục / Nhiều file `.TXT`**:
-   - Chọn hàng trăm file `.txt` cùng lúc (ví dụ: `0001_Chương 1.txt`, `0002_Chương 2.txt`).
-   - Tự động nhận diện số chương từ tiền tố tên file (`XXXX_`) và bóc tách dòng tiêu đề đầu tiên.
-2. **Tab 2 — Sách điện tử `.EPUB` nguyên tác**:
-   - Đọc cấu trúc `container.xml` -> `.opf` -> `manifest` & `spine` chuẩn quốc tế, giữ đúng thứ tự chương mục của sách gốc tiếng Trung.
-3. **Tab 3 — Tách 1 file `.TXT` lớn gộp nhiều chương (Regex + Bảng Xem Trước)**:
-   - Dành cho file `.txt` chứa cả bộ truyện.
-   - Hỗ trợ mẫu Regex mặc định nhận diện `第...章/节/回/卷` hoặc `Chương/Hồi/Quyển...` và cho phép tùy chỉnh Regex riêng.
-   - Có **Bảng Xem Trước (Preview)** hiển thị danh sách các chương sau khi tách trước khi nhấn xác nhận lưu.
-4. **Tab 4 — Dán Văn Bản Trực Tiếp hoặc Tải Từ URL**:
-   - Dán nhanh nội dung 1 chương lẻ hoặc dán đường dẫn URL chương truyện.
-   - Máy chủ tự động giải mã bảng mã tiếng Trung (**UTF-8, GB18030, GBK**) để không bao giờ bị lỗi font chữ Hán.
+Bấm nút **Thư Viện** ở góc trái trên cùng (hoặc bấm nút **Tiến độ** trong Sidebar) để mở cửa sổ **Thư Viện Truyện & Tổng Quan Tiến Độ**.
 
-### 3.2. Nhập Bản Dịch Ngoài Cả Chương (`.TXT` 1:1)
-Khi đang ở màn hình **Biên tập bản dịch**, nhấn nút **Nhập bản dịch (.TXT)** trên thanh công cụ chương để nạp bản dịch có sẵn từ bên ngoài:
-- Hỗ trợ chọn file `.txt` hoặc dán văn bản trực tiếp.
-- Tùy chọn **Tự động lấy dòng đầu tiên làm Tiêu đề chương (`TITLE`)**.
-- Hiển thị **Bảng Xem Trước Ghép Đoạn 1:1 (`TITLE`, `P0001`..`Pxxxx`)** và cảnh báo ngay nếu số đoạn văn tiếng Việt lệch với số đoạn nguyên tác tiếng Trung.
+### 2.1. Biểu đồ tiến độ toàn thư viện
+- Hiển thị trực quan tỷ lệ hoàn thành của toàn bộ kho truyện theo 3 phân khúc:
+  - 🔵 **Đã duyệt (Hoàn thiện)**: Các chương đã được biên tập và xác nhận hoàn tất.
+  - 🟢 **Đã dịch (Chờ duyệt)**: Các chương đã có bản dịch tiếng Việt từ AI hoặc nhập ngoài nhưng chưa bấm *Duyệt*.
+  - 🟠 **Chưa dịch (Raw gốc)**: Các chương mới nạp nguyên tác chữ Hán.
+- Bạn có thể chuyển đổi giữa biểu đồ **Vòng (Donut)** hoặc **Tròn đặc (Pie)**, và **bấm trực tiếp vào từng lát cắt màu** để lọc danh sách những bộ truyện tương ứng.
+- Chuyển đổi giữa chế độ xem **Kệ Sách (Cards)** và **Bảng Chi Tiết (Matrix)**.
 
----
-
-## 4. Cấu Hình Model Alias, Mức Suy Luận (`Thinking Level`), Bể 50 Key & Chẩn Đoán
-
-Nhấn nút **Preset & Model** trên thanh công cụ trên cùng và chuyển sang **Tab 3: Model, Thinking & Quản Lý Key Pool (50 Keys)**:
-
-### 4.1. Danh sách Model Alias Chuẩn Hóa
-Hệ thống kết nối trực tiếp với `@google/genai` Interactions API và cung cấp các cấu hình Model tối ưu:
-- **`gemini-flash-latest` (Khuyên dùng mặc định)**: Tốc độ cao, văn phong tiếng Việt mượt mà, ổn định cho cả dịch thuật lẫn biên tập hàng loạt.
-- **`gemini-3.8-flash`**: Thế hệ Flash mới cân bằng giữa tốc độ xử lý và khả năng bám sát ngữ cảnh chương dài.
-- **`gemini-4-argon`**: Mô hình suy luận chuyên sâu cho các chương văn chương cổ điển, thơ phú hoặc cấu trúc phức tạp.
-- **`gemini-3.1-flash-lite` (Tốc độ siêu nhanh / Model dự phòng)**: Phản hồi cực nhanh, đồng thời đóng vai trò model dự phòng khi bật chế độ Auto-Fallback.
-- **Nhập mã Model tùy chỉnh**: Cho phép gõ trực tiếp bất kỳ tên model nào khả dụng trên tài khoản của bạn.
-
-### 4.2. Cơ Chế Mức Độ Suy Luận AI (`Thinking Level`: `minimal` • `low` • `medium` • `high`)
-- **Tự động đồng bộ từ SDK & API (`/api/models`)**: Hệ thống tự động lấy danh sách các mức `ThinkingLevel` chuẩn từ SDK (`minimal`, `low`, `medium`, `high`).
-- **Mặc định là `high` (Suy luận sâu)**: Khi bạn không chỉnh sửa, hệ thống luôn để mặc định ở mức **`high`** để đảm bảo chất lượng dịch thuật và biên tập sâu sắc nhất.
-- **Giải pháp chống ngắt kết nối cổng 300 giây (Gateway Timeout)**:
-  - Với các chương rất dài hoặc phức tạp, mức `high` có thể khiến mô hình suy nghĩ lâu và chạm ngưỡng giới hạn 300 giây của cổng mạng.
-  - Bạn có thể chuyển nhanh sang **`medium`** (Cân bằng), **`low`** (Nhanh) hoặc **`minimal`** (Tối giản suy luận — phản hồi tức thì) ở **2 vị trí**:
-    1. **Thanh chọn nhanh `Thinking` ngay trong khung Hàng Đợi (cột trái)**: Bấm đổi tức thì giữa `minimal | low | medium | high` trước hoặc trong khi dịch.
-    2. **Thẻ cấu hình chi tiết trong `Preset & Model -> Tab 3`**: Xem mô tả chi tiết từng mức suy luận.
-- Mức `Thinking Level` đã chọn được áp dụng đồng nhất cho tất cả tác vụ AI: **Dịch chương (`/api/translate`)**, **Trợ lý Biên tập & Làm sạch Block (`/api/editor/assist`)**, và **Quét Từ điển Tiền kỳ (`/api/glossary/extract`)**.
-
-### 4.3. Bể 50 API Key Lưu Bền Vững Vào Dự Án & Phân Luồng 1:1
-- **1 Luồng = 1 Key Độc Lập**: Khi bạn nạp nhiều API Key (tối đa **50 Key**, mỗi dòng 1 Key `AIza...`), luồng #1 dùng Key #1, luồng #2 dùng Key #2... giúp nhân tốc độ dịch lên gấp 5–10 lần mà không bị nghẽn hạn mức trên một Key duy nhất.
-- **Lưu bền vững vào Dự án (Server Project Pool)**: Danh sách Key được lưu trực tiếp vào tệp cấu hình dự án trên máy chủ kết hợp bộ nhớ trình duyệt, giúp bạn tải lại trang hoặc khởi động lại vẫn giữ nguyên 50 Key.
-- **Nút "Xóa sạch Key" an toàn**: Trước khi chia sẻ hoặc Public dự án cho người khác, chỉ cần nhấn **Xóa sạch Key** để gỡ toàn bộ Key khỏi cả máy chủ lẫn trình duyệt.
-- **Chế độ Khóa Cứng Model (`Strict Model Lock`) vs Tự Động Chuyển Tiếp Dự Phòng (`Auto-Fallback`)**:
-  - **Mặc định (Tắt Auto-Fallback)**: Khóa cứng 100% vào đúng Model bạn đã chọn.
-  - **Bật Auto-Fallback**: Khi tất cả Key trên Model chính đều chạm giới hạn `429 Quota`, hệ thống mới tự động chuyển sang model dự phòng `gemini-3.1-flash-lite`.
-- **Công cụ Chẩn Đoán Toàn Diện (`Chẩn đoán Key & 5 Tuyến API`) & `Xóa Cooldown 429`**:
-  - Kiểm tra sức khỏe từng Key trong bể và xác thực trực tiếp 5 tuyến tính năng (*Danh sách Model*, *Dịch thuật*, *Trợ lý Biên tập*, *Quét Từ điển*, *Tải URL*).
-  - Nút **Xóa Cooldown 429** giúp mở khóa ngay lập tức các Key đang trong thời gian chờ nghỉ sau khi bạn vừa thêm Key mới hoặc đổi hạn mức.
+### 2.2. Tạo mới, Chỉnh sửa & Chuyển đổi bộ truyện
+- Bấm **Tạo Bộ Truyện Mới** để khai báo: Tên tiếng Việt, Tên nguyên tác chữ Hán, Tác giả, Thể loại (Tiên hiệp, Huyền huyễn, Đô thị, Khoa huyễn, Võng du, Lịch sử, Đồng nhân, Ngôn tình, Đam mỹ...), Trạng thái (*Đang dịch / Hoàn thành / Tạm dừng*), Mô tả tóm tắt và **Ảnh bìa** (tải ảnh từ máy tính để nhúng trực tiếp vào sách EPUB 3.3).
+- Mỗi bộ truyện được gắn độc lập:
+  - **1 Preset Dịch Thuật** riêng.
+  - **1 Preset Biên Tập AI** riêng.
+  - **1 Bộ Từ điển Tên riêng (Glossary)** riêng và công tắc bật/tắt đính kèm Glossary khi dịch.
+- Trên mỗi thẻ truyện trong kệ sách, bạn có thể bấm:
+  - **Mở bàn dịch**: Chuyển sang bộ truyện đó để làm việc.
+  - **Đọc tiếp** *(nếu có Bookmark)*: Nhảy thẳng tới chương và vị trí cuộn đang đọc dở.
+  - **Nhập chương**, **Xuất EPUB**, **Nhân bản bộ truyện**, **Ghim lên đầu (⭐)** hoặc **Xóa bộ truyện**.
+  - **Khôi Phục `.ZIP`**: Nhập trọn vẹn một gói sao lưu `.ZIP` v5 vào thư viện mà không ảnh hưởng tới các truyện khác.
 
 ---
 
-## 5. Chỉ Dẫn Dịch Thuật (Preset), Từ Điển (Glossary) & Quét Tiền Kỳ Đa Luồng (Pre-Scan)
+## 3. Cấu hình AI: Preset Dịch, Preset Biên Tập, Model & Pool 50 API Keys
 
-Mở **Preset & Model** để quản lý bộ quy tắc dịch thuật và từ điển nhất quán cho từng bộ truyện:
+Bấm nút **Preset & Model** trên thanh Header để mở trung tâm cấu hình trí tuệ nhân tạo. Cửa sổ này gồm **4 thẻ (Tabs)** chuyên biệt:
 
-### 5.1. Chỉ Dẫn Dịch Thuật & Biên Tập (Tab 1)
-- Tích hợp sẵn 2 bộ chỉ dẫn chuẩn:
-  1. **Dịch Trung - Việt | Flash Đa Thể Loại v1.14.0**: Quy chuẩn hóa đại từ nhân xưng, văn phong dịch mượt, giữ nhịp điệu tiểu thuyết mạng và chống dịch sót chữ Hán.
-  2. **Biên Tập Trung - Việt | Flash Đa Thể Loại v1.14.0**: Dành riêng cho chế độ **Biên Tập AI**, tập trung chuốt câu tiếng Việt tự nhiên mà không làm sai lệch nguyên tác.
-- Bạn có thể tạo thêm không giới hạn Preset riêng cho từng thể loại (Tiên hiệp, Đô thị, Khoa huyễn, Đam mỹ...), xuất/nhập Preset ra file `.md` hoặc `.txt`.
+### 3.1. Thẻ 1 — Preset Dịch Thuật (`role: 'translation'`)
+Quản lý các hồ sơ chỉ dẫn hệ thống (*System Instructions*) dùng khi dịch chương từ chữ Hán sang tiếng Việt.
+- Hệ thống tích hợp sẵn 2 bộ Preset dịch thuật chuẩn hóa cho Gemini Interactions API:
+  1. **Dịch Trung–Việt — Flash Đa Thể Loại (Bản Cô Đọng 1.14.1)** *(Mặc định)*: Bản tinh gọn tối ưu tốc độ phản hồi, tự động nhận diện thể loại (Cổ trang, Tu tiên, Đô thị, Khoa huyễn...) để áp dụng đại từ nhân xưng và nhịp văn phù hợp, chống văn phong "mùi dịch máy".
+  2. **Dịch Truyện Trung–Việt — Flash / Flash-Lite (Bản Đầy Đủ 15 Mục 1.14.0)**: Bản quy tắc chi tiết 15 mục dành cho người dùng muốn kiểm soát sâu từng quy chuẩn từ vựng và dấu câu.
+- Bạn có thể **Tạo Preset mới**, **Nhân bản**, **Chỉnh sửa nội dung prompt**, **Nhập/Xuất tệp `.MD`, `.TXT`, `.JSON`** hoặc bấm **Khôi phục gốc** bất cứ lúc nào.
 
-### 5.2. Từ Điển Thuật Ngữ Thông Minh & Lọc Ngữ Cảnh 0.5ms (Tab 2)
-- **Công tắc Đính kèm Từ điển (Mặc định TẮT)**: Bạn hoàn toàn chủ động quyết định có gửi Từ điển vào Prompt hay không bằng nút bật/tắt ngay trên thanh công cụ hoặc trong Tab Từ điển.
-- **Tối ưu Lọc Ngữ Cảnh 0.5ms (Context-Aware Filtering)**: Dù từ điển của bộ truyện có tới 5.000 mục từ, trước khi dịch mỗi chương hệ thống chỉ trích xuất những thuật ngữ **thực sự xuất hiện trong văn bản chương đó** (cộng với các mục được ghim *Luôn gửi*) và nằm trong **Khoảng chương hiệu lực (`Từ chương X -> Đến chương Y`)**.
-- **Chính sách dịch thuật ngữ 4 cấp độ**:
-  - `force` (*Bắt buộc khớp 100%*), `prefer` (*Ưu tiên dùng*), `contextual` (*Tùy ngữ cảnh*), `keep_source` (*Giữ nguyên Hán Việt/Phiên âm*).
-- Hỗ trợ khai báo **Biến thể / Từ đồng nghĩa (`Aliases`)**, **Cách dịch cấm (`Forbidden Target`)** để QA Scanner tự động bắt lỗi, và nút **Áp dụng & Thay thế đồng loạt vào các chương đã dịch**.
+### 3.2. Thẻ 2 — Preset Biên Tập AI (`role: 'editorial'`)
+Quản lý các hồ sơ chỉ dẫn dùng riêng cho nút **AI biên tập** (trên thanh công cụ chương) và nút **Biên tập AI (`N`)** (trong hàng đợi đa luồng).
+- Hệ thống tích hợp sẵn 2 bộ Preset biên tập:
+  1. **Biên Tập Trung–Việt — Flash Đa Thể Loại (Bản Cô Đọng 1.14.1)** *(Mặc định)*: Chuyên rà soát bản dịch tiếng Việt đối chiếu với nguyên tác, tự động diệt sạch chữ Hán còn sót, xóa từ tiếng Anh lọt vô lý, bù đoạn bị khuyết và chuốt mượt câu văn mà không làm lệch số đoạn `P0001..Pxxxx`.
+  2. **Biên Tập AI — Flash / Flash-Lite (Bản Đầy Đủ 10 Mục 1.14.0)**: Bản quy tắc biên tập chi tiết 10 mục.
 
-### 5.3. Trình Quét Dựng Từ Điển Tiền Kỳ Đa Luồng (Pre-Scan Builder)
-Trước khi dịch một bộ truyện mới hoặc một卷 (quyển) mới, bạn có thể dùng khung **Quét & Dựng Từ Điển Tiền Kỳ Đa Luồng** ngay trong Tab 2:
-- **Chọn phạm vi quét**: *Tất cả chương*, *Các chương đã tick*, *Khoảng chương (Từ chương X đến chương Y)*, hoặc *Chương đang mở*.
-- **Cấu hình hiệu năng**: Tùy chọn **Số chương gộp mỗi gói AI (`1–10 chương/gói`)** và **Số luồng chạy song song (`1x–10x`)**, sử dụng đúng mức `Thinking Level` đang chọn.
-- **Điều khiển 3 trạng thái & Tự động bảo vệ 429**:
-  - Hỗ trợ **Tạm dừng (Pause)**, **Tiếp tục (Resume)** và **Dừng hẳn (Hard Stop)** bất kỳ lúc nào.
-  - Nếu toàn bộ Key chạm trần `429 Quota`, hệ thống **tự động Tạm dừng (Auto-Pause)** và giữ nguyên các gói chương chưa quét để bạn nhấn **Tiếp tục** sau mà không mất dữ liệu.
+### 3.3. Thẻ 3 — Chọn Model AI & Mức độ suy luận (Thinking Level)
+- **Danh sách Model Gemini**: Chọn nhanh các dòng model thế hệ mới (như `gemini-flash-latest`, `gemini-flash-lite-latest`, `gemini-3-flash-preview`, `gemini-3.1-pro-preview`...) hoặc bấm **Quét danh sách Model từ Google API** để cập nhật danh sách model mới nhất mà khóa của bạn hỗ trợ.
+- **Mức độ suy luận (`Thinking Level`)**:
+  - `minimal` (**Tối thiểu**): Phản hồi cực nhanh, tiết kiệm hạn mức tối đa. *(Lưu ý: Hệ thống tự động giữ `minimal` cho dòng model `flash-lite`, và tự động nâng lên `low` đối với các model không hỗ trợ `minimal` để tránh lỗi HTTP 400).*
+  - `low` (**Thấp**): Cân bằng tốt giữa tốc độ và độ mượt câu văn.
+  - `medium` (**Trung bình**): Dành cho các chương có nhiều thuật ngữ hoặc đối thoại phức tạp.
+  - `high` (**Cao — Mặc định**): Suy luận sâu trước khi dịch, cho chất lượng văn phong tiểu thuyết cao nhất. *(Đối với chương rất dài `>= 6.000` chữ Hán, nếu lượt thử đầu tiên bị quá thời gian, hệ thống sẽ tự động hạ xuống `low` ở lượt thử kế tiếp để đảm bảo vượt qua mượt mà).*
 
----
-
-## 6. Hàng Đợi Dịch & Biên Tập AI Đa Luồng (1x–10x, Pause / Resume / Hard Stop)
-
-Ở cột mục lục bên trái, khung **Hàng Đợi Đa Luồng** cho phép xử lý hàng chục đến hàng trăm chương tự động:
-
-### 6.1. Hai Chế Độ Chạy Hàng Loạt Độc Lập
-1. **Dịch Đã Chọn (`Dịch Mới 100%`)**: Dịch từ nguyên bản tiếng Trung sang tiếng Việt cho các chương đã tick chọn, khóa khớp cấu trúc dòng `1:1` (`TITLE`, `P0001`..`Pxxxx`).
-2. **Biên Tập Đã Chọn (`Biên Tập AI Thông Minh 2 Cơ Chế`)**:
-   - **Với chương đã khớp đoạn 1:1 nhưng còn sót lỗi cục bộ**: Chỉ gửi riêng các Block ID bị sót chữ Hán / lọt tiếng Anh (`block_cleanup`) để làm sạch siêu tốc.
-   - **Với chương bị báo QA Lệch Đoạn (hoặc chuốt đồng bộ cả chương)**: Hệ thống **tự động gửi TOÀN BỘ CHƯƠNG (`realign_chapter`)** gồm đầy đủ nguyên bản `TITLE`, `P0001`..`Pxxxx` kèm toàn bộ bản dịch hiện có để AI đối chiếu từ đầu đến cuối, phân bổ tách/gộp lại khớp chuẩn 1:1 từng đoạn và dọn sạch lỗi QA (tránh tuyệt đối hiện tượng dịch lặp đoạn cuối do lệch nhịp ở giữa chương).
-
-### 6.2. Chọn Nhanh `Thinking Level` & Điều Khiển Hàng Đợi Thời Gian Thực
-- **Thanh chọn nhanh `Thinking`**: Ngay dưới thanh tiến độ Hàng Đợi, bạn có thể bấm chọn trực tiếp `minimal`, `low`, `medium`, hoặc `high` (mặc định `high`). Nếu gặp chương quá dài dễ bị ngắt kết nối 300 giây, hãy chuyển sang `medium` hoặc `low`.
-- **Bộ nút điều khiển 3 trạng thái**:
-  - **Tạm dừng (Pause)**: Dừng nhận chương mới, chờ luồng đang chạy hoàn tất an toàn.
-  - **Tiếp tục (Resume)**: Chạy tiếp ngay các chương còn lại trong hàng đợi.
-  - **Dừng hẳn / Hủy ngay (Hard Stop)**: Ngắt toàn bộ các luồng mạng đang chạy ngay lập tức và trả các chương đang xử lý dở về trạng thái ban đầu.
-- **Thanh Khôi Phục Nhanh 1-Click**: Khi có chương báo lỗi hoặc bị kẹt trạng thái đang xử lý, một thanh công cụ màu hổ phách sẽ xuất hiện ngay ở cột trái cho phép **Chạy lại các chương lỗi** hoặc **Đặt lại trạng thái chương kẹt** chỉ với 1 cú nhấp chuột.
+### 3.4. Thẻ 4 — Xoay Vòng 50 API Keys & Chống Đứt Cáp 300s (Sợi Dây 1)
+Đây là "động cơ" giúp bạn dịch hàng trăm chương truyện hoàn toàn miễn phí hoặc tốc độ cao mà không sợ nghẽn hạn mức (*Rate Limit 429*) hay lỗi *Gateway Timeout 300s*:
+- **Dán danh sách tối đa 50 khóa Gemini API** (mỗi dòng 1 khóa `AIzaSy...`, hoặc ngăn cách bằng dấu phẩy).
+- Bấm **Lưu Pool Khóa Lên Server**: Danh sách khóa được lưu bền vững trên máy chủ.
+- **Cơ chế hoạt động tự động**:
+  1. **Chia tải Round-Robin**: Khi bạn chạy dịch nhiều luồng (ví dụ 5 luồng hoặc 10 luồng song song), mỗi chương sẽ được phân bổ cho một khóa khác nhau trong Pool.
+  2. **Tự động cô lập khóa chạm hạn mức (Cooldown)**: Nếu một khóa báo lỗi `429 Resource Exhausted`, hệ thống lập tức đánh dấu tạm nghỉ cho khóa đó và **chuyển ngay sang khóa khỏe mạnh tiếp theo trong cùng lượt dịch** (`maxRetries: 0` ở SDK để không bị treo ngầm) mà không làm gián đoạn chương đang dịch.
+  3. **Bảo vệ kép chống đứt cáp 300s (Sợi dây 1)**:
+     - **Cách 2 — Streaming Heartbeat**: Máy chủ phản hồi HTTP 200 ngay tại `0ms` và gửi xung nhịp khoảng trắng mỗi `10 giây` để giữ đường truyền trình duyệt luôn sống trong suốt quá trình AI suy luận.
+     - **Cách 1 — Tự động làm mới Sợi dây 1 (`renewWire1`)**: Nếu một khóa thử thất bại khi tổng thời gian kết nối đã chạm ngưỡng `>= 90 giây`, máy chủ chủ động đóng kết nối cũ và báo trình duyệt mở tức thì một HTTP Request mới (kèm danh sách các khóa đã thử), đưa bộ đếm 300 giây của cổng mạng về `0s`.
 
 ---
 
-## 7. Biên Tập Song Ngữ 1:1 Khóa Dòng Block-ID & Trợ Lý AI Tinh Chỉnh
+## 4. Nhập chương nguyên tác (Raw) & Nhập bản dịch có sẵn
 
-Chế độ **Biên tập bản dịch** được thiết kế theo mô hình bảng khóa dòng `1:1` chuyên nghiệp:
+### 4.1. Nhập chương nguyên tác chữ Hán (Nút `Nhập Raw`)
+Bấm nút **Nhập Raw** trên thanh Header, bạn có **4 phương thức** linh hoạt:
+1. **Tải tệp `.TXT` / `.MD` (Kéo thả hoặc chọn nhiều tệp)**:
+   - Hỗ trợ chọn hàng loạt tệp `.txt` rời rạc hoặc **1 tệp `.txt` gộp cả bộ truyện** (dung lượng lớn hàng chục MB).
+   - **Tự động nhận diện bảng mã (Encoding)**: Tự động giải mã chuẩn `UTF-8`, `GB18030 / GBK` (tiếng Trung giản thể nội địa) và `Big5` (tiếng Trung phồn thể) — không bao giờ bị lỗi chữ tượng hình rác (*Mojibake*).
+   - **Tự động tách chương thông minh bằng Regex**: Tự động nhận diện các dòng tiêu đề dạng `第1章...`, `第一章...`, `Chương 1:...`, `Chapter 1...` hoặc tách theo dung lượng ký tự nếu tệp không có tiêu đề chương.
+2. **Tải gói nén `.ZIP` nhiều chương**: Tự động giải nén, sắp xếp đúng thứ tự số chương và nạp toàn bộ vào bộ truyện.
+3. **Dán văn bản trực tiếp (Paste Raw)**: Dán nhanh một hoặc nhiều chương chữ Hán từ bộ nhớ tạm.
+4. **Tải từ đường dẫn web (Fetch URL)**: Dán URL trang đọc truyện chữ Hán để máy chủ tự động bóc tách tiêu đề và nội dung chương.
 
-### 7.1. Bảng Khóa Dòng 1:1 (`TITLE`, `P0001`..`Pxxxx`) & Thanh Công Cụ Ghim Cố Định
-- Mỗi đoạn văn nguyên bản tiếng Trung ở cột trái được gắn một mã định danh cố định (`TITLE`, `P0001`, `P0002`...) và khóa ngang hàng 1:1 với ô nhập tiếng Việt tương ứng ở cột phải.
-- Ô nhập tiếng Việt tự động giãn chiều cao theo độ dài văn bản; nhấn `Backspace` ở đầu ô không bao giờ làm nhảy hay gộp nhầm sang đoạn văn phía trên.
-- **Thanh công cụ ghim cố định (Pinned Stationary Toolbar)**: Luôn nằm cố định phía trên bảng biên tập khi bạn cuộn trang, bao gồm:
-  - **Hoàn tác / Làm lại (`Undo / Redo` — tối đa 60 bước)**, **Sao chép / Cắt / Dán**, **Chuẩn hóa dấu câu tiếng Việt**.
-  - **Bộ lọc hiển thị**: Xem **Tất cả đoạn (`Tất cả`)** hoặc chỉ lọc riêng **Các đoạn có cảnh báo lỗi (`Block lỗi`)** để rà soát siêu tốc.
-  - **Tìm & Thay thế nhanh trong chương (`Tìm & Thay`)**: Hỗ trợ tìm kiếm và thay thế tức thì ngay trong chương đang mở.
-
-### 7.2. Bộ Công Cụ Căn Chỉnh Đoạn Văn & Trợ Lý AI Thông Minh
-Trên mỗi dòng đoạn văn (`Pxxxx`) và trên thanh công cụ có đầy đủ các thao tác xử lý nhanh:
-- **Căn chỉnh cấu trúc đoạn 1:1**:
-  - `Gộp ↓`: Gộp đoạn hiện tại với đoạn kế tiếp bên dưới (kéo các đoạn dưới lên 1 nhịp).
-  - `Tách ↵` (hoặc phím tắt `Ctrl + Enter` tại vị trí con trỏ): Tách đoạn đang chọn thành 2 đoạn độc lập (đẩy các đoạn dưới xuống 1 nhịp).
-  - `Đẩy ↓`: Chèn 1 ô trống tại vị trí hiện tại để đẩy các đoạn dịch bên dưới xuống 1 nhịp.
-  - `Kéo ↑`: Xóa ô dịch dư tại vị trí hiện tại để kéo các đoạn dịch bên dưới lên 1 nhịp.
-  - `Xóa Hán`: Quét và xóa tức thì các ký tự chữ Hán còn sót trong đoạn hoặc toàn chương.
-  - `AI Dịch Block`: Dịch lại riêng đoạn văn `Pxxxx` đang chọn bằng AI mà không ảnh hưởng tới các đoạn khác.
-- **Nút `AI biên tập` / `AI Căn Lại & Biên Tập Cả Chương` (Tự động nhận diện Lệch Đoạn — Có Nút Hủy 1-Click)**:
-  - **Khi chương bị báo QA Lệch Đoạn (`Lệch X/Y đoạn`)**: Nút sẽ tự động gửi **TOÀN BỘ CHƯƠNG (`realign_chapter`)** gồm toàn bộ nguyên tác và bản dịch hiện có để AI phân bổ, tách/gộp lại đúng 1:1 từng mã `TITLE`, `P0001`..`Pxxxx` từ đầu đến cuối chương.
-  - **Khi chương đã khớp 1:1 và chỉ có vài Block lỗi**: Nút chỉ gom riêng các đoạn lỗi đó (`block_cleanup`) gửi cho AI xử lý nhanh trong một lượt rồi ghép trả lại đúng vị trí `Pxxxx`. Bạn có thể nhấn **Hủy** bất cứ lúc nào nếu muốn dừng ngay.
-- **Trợ lý AI theo vùng bôi đen**: Bôi đen một câu/đoạn bất kỳ rồi nhấn **Chuốt mượt**, **Sửa xưng hô**, **3 Gợi ý**, hoặc **Lệnh AI...** để tinh chỉnh theo ý muốn.
+### 4.2. Nhập bản dịch tiếng Việt có sẵn vào chương
+Nếu bạn đã có sẵn bản dịch tiếng Việt từ nguồn khác và muốn đưa vào Studio để đối chiếu song ngữ `P0001..Pxxxx`, chạy biên tập AI hoặc đóng gói EPUB:
+- Chọn chương cần nạp, bấm nút **Nhập bản dịch cả chương** trên thanh công cụ của chương (hoặc dùng nút **Dán Dịch** nhanh trên từng dòng chương ở cột bên trái).
+- Hỗ trợ tải tệp `.txt`/`.md` hoặc dán trực tiếp văn bản tiếng Việt.
+- Hệ thống sẽ tự động tách tiêu đề, phân đoạn `P0001..Pxxxx`, đối chiếu số lượng đoạn với nguyên tác chữ Hán và chạy kiểm định QA ngay lập tức.
 
 ---
 
-## 8. Kiểm Định Chất Lượng Đa Tiêu Chí (QA Scanner) & Tìm / Thay Thế Toàn Văn
+## 5. Xây dựng Từ điển Tên riêng (Glossary) & Quét AI tự động (Pre-Scan)
 
-### 8.1. Bộ Quét Kiểm Định Chất Lượng Tự Động (QA Scanner)
-Mỗi khi dịch xong hoặc khi bạn gõ biên tập, hệ thống tự động quét kiểm định và hiển thị huy hiệu trạng thái ngay trên từng chương và từng đoạn `Pxxxx`:
-1. **Sót chữ Hán (`Residual Chinese`)**: Phát hiện và tô sáng chính xác vị trí ký tự CJK còn sót lại trong tiêu đề hoặc nội dung tiếng Việt.
-2. **Rò rỉ từ tiếng Anh của AI (`English Leak`)**: Bắt các từ tiếng Anh do AI vô tình chèn vào văn cảnh cổ trang/tiên hiệp (như `system`, `level`, `boss`, `skill`, `ok`, `sorry`... trừ các từ viết tắt hợp lệ).
-3. **Lệch cấu trúc đoạn 1:1 (`Block Alignment`)**: Cảnh báo khi có đoạn nguyên tác chưa được dịch hoặc số đoạn bị lệch.
-4. **Vi phạm Từ cấm & Cách dịch cấm trong Từ điển (`Banned Words & Glossary Violations`)**: Kiểm tra danh sách từ cấm tùy chỉnh và các mục `Forbidden Target` hoặc `force` trong Từ điển.
+Để tên nhân vật, địa danh, chiêu thức, cảnh giới và đại từ xưng hô **nhất quán 100%** từ chương 1 đến chương cuối, hãy bấm nút **Glossary** trên thanh Header.
 
-### 8.2. Tìm Kiếm Toàn Văn & Thay Thế Hàng Loạt Chương (`Tìm Toàn Văn`)
-Nhấn nút **Tìm Toàn Văn** ở cột trái để mở công cụ tra cứu xuyên suốt toàn bộ bộ truyện:
-- Tìm kiếm theo **Bản dịch tiếng Việt**, **Nguyên bản tiếng Trung**, hoặc **Cả hai**.
-- Hỗ trợ phân biệt chữ hoa/thường (`Case Sensitive`), biểu thức chính quy (`Regex`), lọc phạm vi (*Toàn bộ chương*, *Các chương đã tick*, *Chương đang mở*).
-- Cho phép **Nhảy tới chương khớp từ khóa**, **Tick chọn toàn bộ các chương chứa từ khóa**, hoặc **Thay thế đồng loạt (Bulk Replace)** kèm quét lại QA tự động.
+### 5.1. Quét AI tự động trích xuất Glossary (Pre-Scan Chapters)
+Trước khi bấm dịch hàng loạt một bộ truyện mới, bạn nên dùng tính năng **AI Quét Chương Đầu**:
+1. Chọn số lượng chương đầu muốn quét (ví dụ: 5, 10 hoặc 20 chương đầu).
+2. Bấm **Bắt Đầu Quét AI**: Hệ thống sẽ đọc nguyên tác chữ Hán, tự động phát hiện và lập danh sách:
+   - **Nhân vật (`character`)**, **Địa danh (`location`)**, **Cảnh giới / Tu vi (`realm`)**, **Pháp bảo / Kỹ năng (`item` / `skill`)**, **Tổ chức / Tông môn (`organization`)**, **Danh hiệu (`title`)**...
+   - Kèm theo **tần suất xuất hiện**, **bản dịch Hán-Việt chuẩn**, **cách xưng hô gợi ý** và **câu trích dẫn ngữ cảnh gốc**.
+3. Bạn có thể xem trước, chỉnh sửa hoặc bấm **Lưu vào Glossary** chỉ với 1 cú nhấp chuột.
 
----
-
-## 9. Chế Độ Đọc Sạch (Justify), Màu HEX/RGB, Font Cá Nhân & Sổ Tay Highlight
-
-Chuyển sang chế độ **Đọc** ở thanh trên cùng để tận hưởng trải nghiệm đọc sách hoàn chỉnh:
-- **Căn đều hai lề (`text-align: justify`) & Thụt đầu dòng**: Văn bản được trình bày chuẩn sách in với khoảng cách đoạn, cỡ chữ, chiều cao dòng và độ rộng trang đọc tùy chỉnh linh hoạt.
-- **Tùy biến Màu Sắc HEX / RGB & 4 Giao Diện Mẫu**: Chọn nhanh *Giấy Tuyên Thành*, *Trắng Sứ Thanh Nhã*, *Xanh Trúc Dịu Mắt*, *Đêm Mặc Huyền* hoặc tự chọn mã màu nền / màu chữ HEX & RGB theo sở thích.
-- **Tải Font Chữ Cá Nhân (`.ttf`, `.otf`, `.woff2`)**: Nạp trực tiếp file font từ máy tính vào trình duyệt (lưu bền vững trong IndexedDB) để đọc truyện và nhúng vào sách EPUB.
-- **Đánh Dấu Highlight 3 Màu, Ghi Chú & Lưu Vị Trí Đọc (Bookmark)**:
-  - Bôi đen bất kỳ câu chữ nào khi đang đọc để đánh dấu bằng 3 màu (*Vàng Hổ Phách*, *Xanh Ngọc Bích*, *Đỏ Chu Sa*) kèm ghi chú cá nhân và quản lý tập trung trong **Sổ Tay Highlight**.
-  - Nhấn **Lưu vị trí đọc** để ghi nhớ chính xác chương và tỷ lệ phần trăm cuộn trang; nhấn **Đọc tiếp Chương #...** để quay lại đúng dòng đang đọc dở.
+### 5.2. Quản lý & Nhập/Xuất Glossary thủ công
+- Thêm nhanh thuật ngữ mới, lọc theo phân loại hoặc tìm kiếm theo chữ Hán / tiếng Việt.
+- Hỗ trợ **Nhập / Xuất Glossary** qua định dạng `.CSV`, `.TSV` (dạng `Hán=Việt`) hoặc `.JSON`.
+- **Công tắc Đính kèm Glossary**: Khi bật, hệ thống chỉ trích lọc thông minh những thuật ngữ thực sự xuất hiện trong chương đang dịch để gửi kèm cho AI, giúp tiết kiệm token và tăng độ chính xác tuyệt đối.
 
 ---
 
-## 10. Xuất Sách Điện Tử EPUB 3.3, ZIP TXT, TXT Gộp & Sao Lưu Dự Án `.ZIP` (Backup v5)
+## 6. Dịch hàng loạt đa luồng (1x–10x) & Hàng đợi Biên tập AI
 
-Nhấn nút **Xuất & Sao lưu** ở góc phải trên cùng để mở trung tâm xuất bản và sao lưu dữ liệu:
+Tại cột danh sách chương bên trái (Sidebar), bạn có thể vận hành dây chuyền sản xuất tốc độ cao:
 
-### 10.1. Tab 1 — Xuất Sách Đọc (EPUB 3.3 / ZIP TXT / TXT Gộp)
-- **Tự động kiểm tra & Dịch tiêu đề chương còn thiếu**: Trước khi xuất sách, hệ thống tự động thống kê các chương chưa có tiêu đề tiếng Việt hoặc còn sót chữ Hán ở tiêu đề, cho phép nhấn **Dịch tự động toàn bộ tiêu đề thiếu bằng AI** chỉ với 1 cú nhấp chuột.
-- **Quản lý Ảnh Bìa Sách EPUB**: Tải ảnh bìa từ máy tính để nhúng trực tiếp làm trang bìa (`cover.xhtml`) cho sách điện tử.
-- **3 Định dạng xuất bản chuyên nghiệp**:
-  1. **Sách điện tử `.EPUB 3.3` chuẩn quốc tế**: Có mục lục tự động (`nav.xhtml` + `toc.ncx`), trang thông tin sách, ảnh bìa và CSS căn đều hai lề (`justify`), tương thích hoàn hảo với Apple Books, Kindle (Send-to-Kindle), Kobo, Moon+ Reader, Google Play Books.
-  2. **Gói `.ZIP` chứa từng file `.TXT` theo chương**: Đặt tên chuẩn thứ tự `0001_Chương_1.txt`, `0002_Chương_2.txt`...
-  3. **1 File `.TXT` Gộp Toàn Bộ Truyện**: Ghép toàn bộ các chương thành một tệp văn bản duy nhất có phân cách chương rõ ràng.
-- Hỗ trợ chọn phạm vi xuất (*Toàn bộ chương*, *Chỉ các chương đã dịch*, *Chỉ các chương đang tick chọn*) và chế độ trình bày (*Chỉ Tiếng Việt sạch* hoặc *Song ngữ Trung - Việt xen kẽ từng đoạn*).
+### 6.1. Chọn chương & Chạy hàng đợi
+1. **Chọn chương**:
+   - Tích chọn từng chương bằng hộp kiểm (Checkbox).
+   - Hoặc nhập số chương bắt đầu – kết thúc vào ô **Chọn dải chương (`Từ` ... `Đến`)** rồi bấm **Chọn** (hoặc bấm **Chọn tất cả**).
+2. **Chọn số luồng chạy song song (`1x` đến `10x`)**:
+   - Nếu chỉ có 1 API Key: Nên chọn `1x` hoặc `2x`.
+   - Nếu đã nạp từ 10 – 50 API Keys vào Pool: Có thể kéo lên `5x`, `8x` hoặc `10x` để dịch 10 chương cùng một lúc.
+3. **Hai chế độ chạy hàng loạt**:
+   - **Nút `Dịch (N)`**: Dịch mới toàn bộ các chương đã chọn theo Preset Dịch Thuật (`blocks-v1` — 1 Request = 100% toàn bộ chương theo cấu trúc JSON Block-ID).
+   - **Nút `Biên tập AI (N)`**: Chạy biên tập AI hàng loạt cho các chương đã có bản dịch theo cơ chế **1 Request = 100% Toàn bộ chương (`realign_chapter` / `chapter-realign-edit-v1`)** để AI đối chiếu toàn bộ nguyên tác chữ Hán và bản dịch hiện tại, vừa làm sạch chữ Hán sót / từ tiếng Anh lọt / đoạn khuyết, vừa căn chỉnh lại khớp 1:1 từng mã đoạn `TITLE`, `P0001`..`Pxxxx` và chuốt mượt văn phong toàn chương.
 
-### 10.2. Tab 2 — Sao Lưu & Khôi Phục Dự Án Toàn Diện `.ZIP` (Backup v5)
-- **Xuất Gói Sao Lưu Dự Án `.ZIP` (Backup v5)**: Đóng gói toàn bộ dữ liệu bộ truyện vào một tệp `.zip` có cấu trúc thư mục rõ ràng (`backup-manifest.json`, `project/novel.json`, `chapters/`, `glossary/`, `presets/`, `assets/` bao gồm cả ảnh bìa và font chữ cá nhân).
-- **Khôi Phục Dự Án Từ Gói `.ZIP`**: Chọn tệp `.zip` Backup v5 để khôi phục 100% chương truyện, trạng thái duyệt, từ điển, highlight và cài đặt đọc trên bất kỳ thiết bị nào.
+### 6.2. Hủy tác vụ tức thời (1-Click Cancel)
+- Trong khi đang dịch hoặc biên tập (dù là 1 chương lẻ hay hàng đợi 10 luồng), bạn có thể bấm nút **Dừng hàng đợi** (hoặc nút **Đang dịch... (Hủy)** / **Đang biên tập... (Hủy)** trên từng chương) để ngắt kết nối ngay lập tức và khôi phục trạng thái chương an toàn.
 
 ---
 
-## 11. System Terminal Thời Gian Thực (`Ctrl + \``) & Bảng Phím Tắt Toàn Cục
+## 7. Bàn Biên Tập Song Ngữ 1:1 Block-ID (`TITLE`, `P0001`..`Pxxxx`)
 
-### 11.1. System Terminal & Bảng Chẩn Đoán Kỹ Thuật (`Ctrl + \``)
-Nhấn nút **Terminal** ở góc phải dưới màn hình (hoặc phím tắt `Ctrl + \``) để mở bảng theo dõi hệ thống thời gian thực:
-- **Nhật ký hợp nhất (Client + Server API)**: Hiển thị chi tiết từng yêu cầu dịch thuật, biên tập, quét từ điển, thời gian phản hồi (`ms`), Model thực tế đã dùng (`modelUsed`), mức suy luận (`thinkingLevelUsed`), luồng Key nào được cấp phát (`keyMask`) và trạng thái Cooldown.
-- **Nút Chẩn Đoán Nhanh 1-Click**: Kiểm tra tức thì kết nối `/api/models`, `/api/logs` và sao chép toàn bộ nhật ký kỹ thuật ra Clipboard.
+Đây là trái tim của **Mặc Hương Các Studio**, giải quyết triệt để nỗi ám ảnh "AI dịch thiếu đoạn, gộp đoạn hoặc lệch dòng" thường gặp ở các công cụ dịch truyền thống.
 
-### 11.2. Bảng Phím Tắt Toàn Cục
-| Phím tắt | Chức năng thực thi |
-| :--- | :--- |
-| **`Ctrl + S`** (hoặc `Cmd + S`) | Lưu ngay chương đang biên tập vào cơ sở dữ liệu trình duyệt (IndexedDB) |
-| **`Ctrl + Z` / `Ctrl + Y`** | Hoàn tác (Undo) / Làm lại (Redo) thao tác chỉnh sửa trong bảng biên tập 1:1 |
-| **`Ctrl + Enter`** | Tách đoạn văn (`Block Pxxxx`) đang đặt con trỏ thành 2 đoạn tại đúng vị trí con trỏ |
-| **`Alt + ←` / `Alt + →`** | Chuyển nhanh sang **Chương trước** / **Chương tiếp theo** (tự động cuộn lên đầu chương) |
-| **`Ctrl + \``** | Bật / Tắt ngăn kéo **System Terminal** theo dõi nhật ký AI và mạng thời gian thực |
+### 7.1. Nguyên lý Bất biến 1:1 Block-ID
+- Mỗi chương nguyên tác được đánh mã cố định:
+  - `TITLE`: Tiêu đề chương.
+  - `P0001`, `P0002`, `P0003`... `Pxxxx`: Từng đoạn văn trong thân chương.
+- Khi AI dịch trả về JSON, hệ thống khớp chính xác từng mã `Pxxxx` vào đúng vị trí của nguyên tác. Nếu chẳng may AI bỏ sót đoạn `P0015`, chỉ riêng ô `P0015` hiện cảnh báo đỏ **"Thiếu bản dịch"**, còn `P0016` trở đi vẫn nằm **đúng hàng 100%** với nguyên tác chữ Hán bên trái (tuyệt đối không bị dồn hàng dây chuyền).
+
+### 7.2. Các công cụ xử lý trên từng dòng Block `Pxxxx`
+Tại mỗi dòng đoạn văn trong bảng **Song ngữ 1:1 Block-ID**, bạn có các nút thao tác tức thời ở góc phải của dòng:
+- **`✨ AI Dịch Block`**: Gửi riêng đoạn `Pxxxx` đó (kèm ngữ cảnh đoạn liền trước và liền sau qua luồng `block_cleanup` / `block-cleanup-v1`) để AI dịch lại hoặc dọn sạch lỗi của riêng đoạn đó trong vài giây mà không đụng chạm tới các đoạn khác.
+- **4 công cụ nắn dòng thủ công (khi bạn nhập bản dịch từ bên ngoài bị lệch số đoạn so với nguyên tác)**:
+  - **`[Gộp ↓]`**: Gộp đoạn dịch hiện tại với đoạn dịch ngay bên dưới (dùng khi 1 đoạn gốc bị người dịch tách làm 2 đoạn).
+  - **`[Tách ↵]`** *(hoặc đặt con trỏ chuột tại vị trí muốn ngắt câu trong ô tiếng Việt rồi nhấn phím tắt `Ctrl + Enter`)*: Tách đôi đoạn dịch hiện tại thành 2 đoạn riêng biệt (dùng khi 2 đoạn gốc bị gộp chung vào 1 ô).
+  - **`[Đẩy ↓]`**: Chèn một ô trống tại dòng hiện tại để đẩy phần dịch từ dòng này trở xuống lùi 1 nhịp.
+  - **`[Kéo ↑]`** *(hiện khi ô hiện tại đang trống)*: Xóa ô trống hiện tại để kéo toàn bộ các đoạn dịch bên dưới nhích lên 1 nhịp.
+- **Nút tổng hợp trên thanh tiêu đề bảng Block-ID**:
+  - Khi chương có đoạn bị sót Hán tự, lọt từ tiếng Anh, khuyết bản dịch hoặc lệch tổng số đoạn, nút **`AI Biên Tập & Dọn N Block Lỗi`** (hoặc **`AI Căn Lại & Biên Tập Cả Chương`**) sẽ xuất hiện ngay trên đầu bảng. Chỉ cần bấm 1 lần, AI sẽ đối chiếu toàn chương (`realign_chapter`) để sửa toàn bộ lỗi và căn chỉnh lại khớp 1:1 hoàn hảo.
+
+### 7.3. Chế độ Soạn thảo thuần & Trợ lý AI cho đoạn bôi đen
+Nếu bạn chuyển công tắc sang chế độ **Soạn thảo thuần**:
+- Bạn có thể bôi đen bất kỳ câu/đoạn tiếng Việt nào để bật thanh công cụ **Trợ lý Biên tập AI**:
+  - **Chuốt văn phong**: Viết lại câu văn mượt mà, giàu hình ảnh hơn.
+  - **Sửa lỗi xưng hô**: Đồng bộ lại đại từ nhân xưng theo ngữ cảnh.
+  - **Đề xuất 3 phương án dịch khác**: AI đưa ra 3 cách diễn đạt với sắc thái khác nhau để bạn chọn đè vào chỉ bằng 1 cú nhấp.
+
+---
+
+## 8. Kiểm định chất lượng tự động (QA Scanner) & Tìm/Thay thế Toàn văn
+
+### 8.1. Bộ quét QA Đa Tiêu Chí (QA Scanner)
+Mỗi khi một chương dịch xong hoặc được lưu, bộ máy QA tự động kiểm tra 5 nhóm lỗi và gắn huy hiệu trên thanh công cụ:
+1. 🀄 **Sót Hán tự (`residual_chinese`)**: Phát hiện mọi ký tự chữ Hán còn sót lại trong tiêu đề hoặc nội dung tiếng Việt.
+2. 🔤 **Lọt từ tiếng Anh (`leaked_english`)**: Phát hiện các từ tiếng Anh do AI sinh lỗi (như *suddenly, however, system, chapter...*), đồng thời thông minh bỏ qua tên riêng tiếng Việt không dấu hoặc các từ viết tắt hợp lệ.
+3. 📖 **Vi phạm Glossary (`glossary_mismatch`)**: Cảnh báo khi nguyên tác chữ Hán có xuất hiện thuật ngữ trong Từ điển nhưng bản dịch tiếng Việt lại không dùng đúng từ đã quy định.
+4. 📐 **Lệch số đoạn 1:1 (`formatting`)**: Cảnh báo khi tổng số đoạn dịch chưa khớp 1:1 với số đoạn nguyên tác.
+5. 📏 **Câu văn quá dài (`long_sentence`)**: Cảnh báo những câu văn dài bất thường thiếu dấu ngắt câu.
+
+### 8.2. Tìm & Thay Thế Toàn Văn (Full-Text Search & Replace)
+Bấm nút **Toàn văn** trên thanh tìm kiếm của cột danh sách chương bên trái:
+- Tìm kiếm một từ, cụm từ hoặc tên nhân vật trên **toàn bộ các chương** của bộ truyện (hoặc chỉ trong các chương đã chọn).
+- Hỗ trợ tùy chọn: **Phân biệt chữ hoa/thường (`Aa`)**, **Khớp nguyên từ (`Whole Word`)** và **Biểu thức chính quy (`Regex`)**.
+- Xem trước từng câu chứa từ khóa được tô sáng, tích chọn những vị trí muốn đổi và bấm **Thay thế tất cả**.
+- Có nút **Hoàn tác (Undo)** ngay lập tức nếu bạn muốn khôi phục lại trạng thái trước khi thay thế.
+
+---
+
+## 9. Chế độ Đọc Truyện (Clean Justified Reader), Highlight & Bookmark
+
+Bấm nút **Đọc** trên thanh công cụ chương để bước vào không gian thưởng thức tiểu thuyết chuyên nghiệp:
+
+### 9.1. Trải nghiệm Đọc Căn Đều Hai Bên (`Clean Justified`)
+- Toàn bộ thanh công cụ kỹ thuật và văn bản chữ Hán được ẩn đi, chỉ hiển thị tiêu đề và nội dung tiếng Việt đã căn đều hai bên lề (`text-align: justify`), thụt đầu dòng chuẩn sách in.
+- Chuyển chương nhanh bằng nút **Chương trước / Chương sau** hoặc nhấn phím mũi tên `←` / `→` trên bàn phím.
+
+### 9.2. Tùy biến Giao diện Đọc & Tải Phông Chữ Riêng (`Reader Appearance`)
+Bấm nút **Giao diện đọc (Aa)** trong chế độ đọc để tùy chỉnh:
+- **6 Chủ đề màu nền (Themes)**: Giấy Tuyên Thành ấm áp (*Warm Paper*), Trắng tinh khôi (*Pure Daylight*), Vàng cổ điển (*Sepia*), Xanh dịu mắt (*Sage Green*), Đêm tĩnh lặng (*Dark Charcoal*) và Đen tuyền OLED (*Midnight OLED*).
+- **Kho phông chữ Tiếng Việt & Tải Font riêng**: Chọn sẵn *Literata, Noto Serif, Lora, Merriweather, Source Serif 4, Be Vietnam Pro, Plus Jakarta Sans, Inter, Roboto* — hoặc bấm **Tải phông chữ từ máy (`.ttf`, `.otf`, `.woff`, `.woff2`)** để đọc bằng bất kỳ bộ font yêu thích nào của bạn.
+- Điều chỉnh **Cỡ chữ (`14px – 32px`)**, **Giãn dòng (`Line Height`)**, **Khoảng cách đoạn**, **Độ rộng trang đọc** và bật/tắt **Thụt đầu dòng đoạn văn**.
+
+### 9.3. Tô sáng (Highlight 3 màu) & Đánh dấu trang (Bookmark)
+- **Tô sáng & Ghi chú**: Bôi đen bất kỳ câu văn tâm đắc nào trong chế độ đọc để hiện bảng chọn **3 màu bút dạ quang** (*Vàng Hổ Phách, Xanh Ngọc Bích, Xanh Thanh Thiên*), thêm ghi chú cá nhân hoặc sao chép trích dẫn. Mở ngăn **Highlights** để xem lại danh sách toàn bộ trích dẫn trong truyện và bấm nhảy thẳng tới câu đó.
+- **Đánh dấu trang (Bookmark)**: Bấm biểu tượng **Bookmark** để lưu lại chính xác chương và **tỷ lệ cuộn trang (`scrollRatio`)** hiện tại. Lần sau mở ứng dụng, bạn chỉ cần bấm **Đọc tiếp Bookmark** để quay lại đúng dòng đang đọc dở.
+
+---
+
+## 10. Xuất sách điện tử W3C EPUB 3.3, Tệp Gộp `.TXT` & Sao lưu `.ZIP` v5
+
+Bấm nút **EPUB & Backup** trên thanh Header để mở trung tâm xuất bản và sao lưu:
+
+### 10.1. Đóng gói sách điện tử chuẩn W3C EPUB 3.3 (`.epub`)
+- Tạo tệp sách điện tử `.epub` hoàn chỉnh theo tiêu chuẩn **W3C EPUB 3.3** mới nhất, tương thích 100% với **Apple Books (iOS/macOS), Google Play Books, Amazon Kindle (Send to Kindle), Kobo, Moon+ Reader, Lithium, KOReader...**
+- Tự động đóng gói:
+  - **Trang bìa (Cover Image)** chất lượng cao (nếu chưa tải ảnh bìa riêng, hệ thống tự động vẽ một trang bìa nghệ thuật mang tên tác phẩm và tác giả).
+  - **Mục lục tự động 2 chuẩn (`nav.xhtml` EPUB 3 + `toc.ncx` EPUB 2)** giúp mọi máy đọc sách đều nhận diện đầy đủ danh sách chương.
+  - **Bảng kiểu dáng CSS chuẩn sách in**: Căn đều hai bên (`text-align: justify`), thụt đầu dòng đoạn văn, ngắt trang sạch sẽ giữa các chương.
+- Tùy chọn phạm vi xuất: Xuất toàn bộ các chương đã có bản dịch, chỉ xuất các chương đã duyệt, hoặc xuất theo dải chương tùy chọn.
+
+### 10.2. Xuất tệp văn bản `.TXT` (Gộp 1 tệp hoặc Tách rời từng chương)
+- **Xuất 1 tệp `.TXT` gộp toàn truyện**: Tùy chọn chỉ xuất tiếng Việt, xuất Song ngữ (Hán – Việt xen kẽ từng đoạn), hoặc chỉ xuất Raw chữ Hán.
+- **Xuất gói `.ZIP` chứa các tệp `.TXT` rời**: Mỗi chương là một tệp `.txt` riêng biệt được đánh số thứ tự chuẩn (`0001_Chuong-1.txt`...).
+
+### 10.3. Sao lưu & Khôi phục Toàn bộ Dự án (`.ZIP` Backup v5)
+- **Xuất gói Backup `.ZIP` v5**: Đóng gói toàn bộ dữ liệu của bộ truyện hiện tại (Thông tin truyện, Ảnh bìa, toàn bộ Chương Raw + Bản dịch + Lịch sử Revision + Báo cáo QA, Từ điển Glossary, các Preset chỉ dẫn và danh sách Highlight/Bookmark) vào 1 tệp `.zip` duy nhất.
+- **Khôi phục từ gói Backup `.ZIP` v5**: Bạn có thể mang tệp `.zip` này sang máy tính khác và nạp lại ngay trong mục **EPUB & Backup** hoặc nút **Khôi Phục `.ZIP`** trong **Thư Viện**.
+
+---
+
+## 11. Trạm Giám Sát Hệ Thống (System Terminal Drawer)
+
+Bấm nút **Terminal** ở góc phải trên cùng để mở bảng giám sát kỹ thuật theo thời gian thực:
+- **Thẻ Nhật Ký Thời Gian Thực (Live Logs)**: Hiển thị chi tiết từng bước hệ thống đang thực hiện (Gửi yêu cầu dịch chương nào, dùng API Key số mấy, mất bao nhiêu mili-giây, nhận về bao nhiêu Block JSON, kết quả quét QA...). Hỗ trợ lọc theo mức độ (`INFO`, `SUCCESS`, `WARN`, `ERROR`), tìm kiếm log và xuất tệp nhật ký.
+- **Thẻ Trạng Thái Pool 50 API Keys (Key Pool Health)**: Hiển thị bảng điều khiển trực quan cho toàn bộ các khóa trong Pool:
+  - Khóa nào đang **Sẵn sàng (Active/Idle)**, khóa nào đang **Đang bận xử lý (Busy)**, khóa nào đang **Tạm nghỉ do chạm hạn mức 429 (Cooldown — kèm đồng hồ đếm ngược giây hồi phục)**.
+  - Thống kê số lượt gọi thành công và số lần gặp lỗi của từng khóa.
+
+---
+
+## 12. Phím tắt bàn phím & Mẹo xử lý sự cố thường gặp
+
+### 12.1. Các phím tắt tiện lợi
+- **`Ctrl + S` (hoặc `Cmd + S` trên Mac)**: Lưu nhanh bản biên tập hiện tại của chương và tạo mốc lịch sử Revision mới.
+- **`Ctrl + Enter`** *(khi đang đặt con trỏ trong ô tiếng Việt ở bảng Song ngữ 1:1 Block-ID)*: Tách đôi đoạn văn ngay tại vị trí con trỏ chuột thành 2 đoạn `Pxxxx` liên tiếp.
+- **Phím mũi tên `←` / `→`** *(khi đang ở chế độ Đọc truyện)*: Chuyển nhanh sang Chương trước / Chương tiếp theo.
+- **`Esc`**: Đóng các cửa sổ hộp thoại (Modal) đang mở.
+
+### 12.2. Mẹo xử lý nhanh các tình huống thường gặp
+1. **Khi đang dịch hàng loạt mà gặp báo lỗi `429 Resource Exhausted`**:
+   - Đây là giới hạn số lượt gọi mỗi phút của gói Gemini API miễn phí. Bạn chỉ cần mở **Preset & Model -> Xoay Vòng 50 API Keys** và dán thêm nhiều khóa API từ các dự án Google AI Studio khác nhau. Hệ thống sẽ tự động xoay vòng qua các khóa rảnh rỗi mà không bị dừng hàng đợi.
+2. **Khi chương dịch xong có cảnh báo "Lệch số đoạn" hoặc "Sót chữ Hán"**:
+   - Chuyển sang bảng **Song ngữ 1:1 Block-ID**, bấm nút **`AI Biên Tập & Dọn N Block Lỗi`** (hoặc **`AI Căn Lại & Biên Tập Cả Chương`**) màu xanh ngọc ở đầu bảng (hoặc bấm nút **`AI biên tập`** trên thanh công cụ). AI sẽ tự động đối chiếu toàn chương và căn chỉnh lại khớp 1:1 chỉ sau vài giây.
+3. **Khi nhập bản dịch có sẵn từ bên ngoài bị lệch dòng từ đoạn `P0010` trở đi**:
+   - Kéo tới đúng dòng `P0010` trong bảng Song ngữ 1:1 Block-ID: nếu thấy 2 đoạn gốc bị gộp vào 1 ô tiếng Việt, hãy đặt chuột vào giữa hai câu rồi nhấn **`Ctrl + Enter`** (hoặc nút **`[Tách ↵]`**); toàn bộ các đoạn từ `P0011` trở xuống sẽ lập tức trượt vào đúng khớp 1:1 với nguyên tác chữ Hán!

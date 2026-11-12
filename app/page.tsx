@@ -346,12 +346,24 @@ export default function MacHuongCacStudioPage() {
     });
   }, []);
 
-  // Global keyboard shortcut: Ctrl + ` (or Cmd + `) to toggle System Terminal Drawer
+  // Global keyboard shortcut: Ctrl + ` (or Cmd + `) to toggle System Terminal Drawer, and Esc to close open modals
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && (e.key === '`' || e.code === 'Backquote')) {
         e.preventDefault();
         setIsTerminalOpen((prev) => !prev);
+        return;
+      }
+      if (e.key === 'Escape') {
+        setIsUserGuideOpen(false);
+        setIsInstructionsModalOpen(false);
+        setIsLibraryModalOpen(false);
+        setIsImportModalOpen(false);
+        setIsExportModalOpen(false);
+        setIsAppearanceModalOpen(false);
+        setIsSearchReplaceModalOpen(false);
+        setIsTranslationImportModalOpen(false);
+        setIsNewNovelModalOpen(false);
       }
     };
     window.addEventListener('keydown', handleGlobalKeyDown);
@@ -1137,9 +1149,15 @@ export default function MacHuongCacStudioPage() {
         );
 
         const data = res.data || {};
-        if (!res.ok || !res.data) {
+        const cleanBody = (data.translatedContent || '')
+          .replace(/\u200B/g, '')
+          .trim();
+
+        if (!res.ok || !res.data || !cleanBody) {
           const err = new Error(
-            data.error || res.errorMessage || 'Lỗi dịch chương từ Server'
+            data.error ||
+              res.errorMessage ||
+              'Bản dịch trả về từ máy chủ bị trống (0 ký tự). Đã chặn lưu trạng thái Hoàn thành ảo.'
           ) as Error & { poolExhausted429?: boolean };
           if (res.status === 429 || data.poolExhausted429) {
             err.poolExhausted429 = true;
@@ -1292,8 +1310,6 @@ export default function MacHuongCacStudioPage() {
 
       try {
         const {
-          targets: dirtyTargets,
-          allPairs,
           isBlockCountMatched,
           rawBodyBlockCount,
           translatedBodyBlockCount,
@@ -1303,180 +1319,96 @@ export default function MacHuongCacStudioPage() {
           !isBlockCountMatched ||
           Boolean(chapter.qaReport?.blockMismatch);
 
-        // Only use targeted block_cleanup when the chapter is ALREADY 1:1 aligned and has localized dirty blocks.
-        // If the chapter has QA Block Misalignment (lệch đoạn), paragraphs are shifted so we MUST send the ENTIRE chapter!
-        if (!isMisaligned && dirtyTargets.length > 0) {
-          const res = await safeFetchJson<{
-            updates?: Array<{ id: string; translation: string }>;
-            modelUsed?: string;
-            keyUsed?: number;
-            poolExhausted429?: boolean;
-            error?: string;
-          }>(
-            '/api/editor/assist',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-              body: JSON.stringify({
-                action: 'block_cleanup',
-                targets: dirtyTargets,
-                chapterNumber: chapter.chapterNumber,
-                systemInstruction: activeEditorialProfile.systemInstruction,
-                pronounRule: activeEditorialProfile.pronounRule,
-                includeGlossary: shouldSendGlossary,
-                glossary: enabledGlossaryItems,
-                model: modelConfig.selectedModel,
-                fallbackModel: effectiveFallbackModel,
-                thinkingLevel:
-                  modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL,
-              }),
-            },
-            {
-              scope: 'AI_EDITOR',
-              label: `Biên tập Block Cleanup Chương #${chapter.orderPrefix} (${dirtyTargets.length} dirty blocks)`,
-            }
-          );
-          const data = res.data || {};
-          if (!res.ok || !res.data) {
-            const err = new Error(
-              data.error || res.errorMessage || 'Lỗi AI dọn Block ID'
-            ) as Error & { poolExhausted429?: boolean };
-            if (res.status === 429 || data.poolExhausted429) {
-              err.poolExhausted429 = true;
-            }
-            throw err;
+        // STRICT INVARIANT: 1 Request = 100% Full Chapter (never split or subset chapter text).
+        // Always send the entire chapter (action: 'realign_chapter') so 1:1 Block-ID alignment is strictly preserved.
+        const res = await safeFetchJson<{
+          titleTranslated?: string;
+          translatedContent?: string;
+          alignment?: ChapterAlignment;
+          modelUsed?: string;
+          keyUsed?: number;
+          poolExhausted429?: boolean;
+          error?: string;
+        }>(
+          '/api/editor/assist',
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal,
+            body: JSON.stringify({
+              action: 'realign_chapter',
+              chapterNumber: chapter.chapterNumber,
+              titleRaw: chapter.titleRaw,
+              rawContent: chapter.rawContent,
+              titleTranslated: chapter.titleTranslated,
+              translatedContent: chapter.translatedContent,
+              systemInstruction: activeEditorialProfile.systemInstruction,
+              pronounRule: activeEditorialProfile.pronounRule,
+              includeGlossary: shouldSendGlossary,
+              glossary: enabledGlossaryItems,
+              model: modelConfig.selectedModel,
+              fallbackModel: effectiveFallbackModel,
+              thinkingLevel:
+                modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL,
+            }),
+          },
+          {
+            scope: 'AI_EDITOR',
+            label: isMisaligned
+              ? `Biên tập & Căn lại toàn Chương #${chapter.orderPrefix} (Lệch ${translatedBodyBlockCount}/${rawBodyBlockCount} đoạn)`
+              : `Biên tập toàn Chương 1:1 #${chapter.orderPrefix}`,
           }
-          const actualModelUsed: string =
-            data.modelUsed || modelConfig.selectedModel;
-          const actualKeyUsed: number | undefined =
-            typeof data.keyUsed === 'number' ? data.keyUsed : undefined;
+        );
+        const data = res.data || {};
+        const cleanBody = (data.translatedContent || '')
+          .replace(/\u200B/g, '')
+          .trim();
 
-          const updates: Array<{ id: string; translation: string }> =
-            data.updates || [];
-          const merged = applyBlockUpdatesToChapter(
-            allPairs,
-            updates,
-            chapter.titleTranslated
-          );
-          const updated: Chapter = {
-            ...chapter,
-            titleTranslated: merged.titleTranslated,
-            translatedContent: merged.translatedContent,
-            alignment: merged.alignment,
-            translatedByModel: actualModelUsed,
-            lastKeyUsed: actualKeyUsed,
-            status: 'edited',
-            lastError: undefined,
-            updatedAt: Date.now(),
-          };
-          updated.qaReport = scanChapterQA(
-            updated,
-            modelConfig.customBannedWords,
-            modelConfig.qaRules || DEFAULT_QA_VALIDATION_RULES,
-            enabledGlossaryItems
-          );
-          await saveChapter(updated);
-          setChapters((prev) =>
-            prev.map((c) => (c.id === updated.id ? updated : c))
-          );
-          if (options?.isBatch) {
-            setBatchProgress((prev) => ({
-              ...prev,
-              lastModelUsed: actualModelUsed,
-              lastKeyUsed: actualKeyUsed,
-            }));
+        if (!res.ok || !res.data || !cleanBody) {
+          const err = new Error(
+            data.error ||
+              res.errorMessage ||
+              'Bản biên tập trả về từ máy chủ bị trống (0 ký tự). Đã chặn ghi đè chương.'
+          ) as Error & { poolExhausted429?: boolean };
+          if (res.status === 429 || data.poolExhausted429) {
+            err.poolExhausted429 = true;
           }
-          return { chapter: updated };
-        } else {
-          // Send ENTIRE CHAPTER (action: 'realign_chapter') whenever the chapter has QA Block Misalignment (lệch đoạn)
-          // OR when doing whole-chapter AI Editorial polish so 1:1 Block-ID alignment is strictly reconstructed & preserved.
-          const res = await safeFetchJson<{
-            titleTranslated?: string;
-            translatedContent?: string;
-            alignment?: ChapterAlignment;
-            modelUsed?: string;
-            keyUsed?: number;
-            poolExhausted429?: boolean;
-            error?: string;
-          }>(
-            '/api/editor/assist',
-            {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              signal: controller.signal,
-              body: JSON.stringify({
-                action: 'realign_chapter',
-                chapterNumber: chapter.chapterNumber,
-                titleRaw: chapter.titleRaw,
-                rawContent: chapter.rawContent,
-                titleTranslated: chapter.titleTranslated,
-                translatedContent: chapter.translatedContent,
-                systemInstruction: activeEditorialProfile.systemInstruction,
-                pronounRule: activeEditorialProfile.pronounRule,
-                includeGlossary: shouldSendGlossary,
-                glossary: enabledGlossaryItems,
-                model: modelConfig.selectedModel,
-                fallbackModel: effectiveFallbackModel,
-                thinkingLevel:
-                  modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL,
-              }),
-            },
-            {
-              scope: 'AI_EDITOR',
-              label: isMisaligned
-                ? `Biên tập & Căn lại toàn Chương #${chapter.orderPrefix} (Lệch ${translatedBodyBlockCount}/${rawBodyBlockCount} đoạn)`
-                : `Biên tập toàn Chương 1:1 #${chapter.orderPrefix}`,
-            }
-          );
-          const data = res.data || {};
-          if (!res.ok || !res.data) {
-            const err = new Error(
-              data.error ||
-                res.errorMessage ||
-                'Lỗi AI biên tập & căn chỉnh toàn chương'
-            ) as Error & { poolExhausted429?: boolean };
-            if (res.status === 429 || data.poolExhausted429) {
-              err.poolExhausted429 = true;
-            }
-            throw err;
-          }
-          const actualModelUsed: string =
-            data.modelUsed || modelConfig.selectedModel;
-          const actualKeyUsed: number | undefined =
-            typeof data.keyUsed === 'number' ? data.keyUsed : undefined;
-
-          const updated: Chapter = {
-            ...chapter,
-            titleTranslated: data.titleTranslated || chapter.titleTranslated,
-            translatedContent:
-              data.translatedContent || chapter.translatedContent,
-            alignment: data.alignment || chapter.alignment,
-            translatedByModel: actualModelUsed,
-            lastKeyUsed: actualKeyUsed,
-            status: 'edited',
-            lastError: undefined,
-            updatedAt: Date.now(),
-          };
-          updated.qaReport = scanChapterQA(
-            updated,
-            modelConfig.customBannedWords,
-            modelConfig.qaRules || DEFAULT_QA_VALIDATION_RULES,
-            enabledGlossaryItems
-          );
-          await saveChapter(updated);
-          setChapters((prev) =>
-            prev.map((c) => (c.id === updated.id ? updated : c))
-          );
-          if (options?.isBatch) {
-            setBatchProgress((prev) => ({
-              ...prev,
-              lastModelUsed: actualModelUsed,
-              lastKeyUsed: actualKeyUsed,
-            }));
-          }
-          return { chapter: updated };
+          throw err;
         }
+        const actualModelUsed: string =
+          data.modelUsed || modelConfig.selectedModel;
+        const actualKeyUsed: number | undefined =
+          typeof data.keyUsed === 'number' ? data.keyUsed : undefined;
+
+        const updated: Chapter = {
+          ...chapter,
+          titleTranslated: data.titleTranslated || chapter.titleTranslated,
+          translatedContent: data.translatedContent || chapter.translatedContent,
+          alignment: data.alignment || chapter.alignment,
+          translatedByModel: actualModelUsed,
+          lastKeyUsed: actualKeyUsed,
+          status: 'edited',
+          lastError: undefined,
+          updatedAt: Date.now(),
+        };
+        updated.qaReport = scanChapterQA(
+          updated,
+          modelConfig.customBannedWords,
+          modelConfig.qaRules || DEFAULT_QA_VALIDATION_RULES,
+          enabledGlossaryItems
+        );
+        await saveChapter(updated);
+        setChapters((prev) =>
+          prev.map((c) => (c.id === updated.id ? updated : c))
+        );
+        if (options?.isBatch) {
+          setBatchProgress((prev) => ({
+            ...prev,
+            lastModelUsed: actualModelUsed,
+            lastKeyUsed: actualKeyUsed,
+          }));
+        }
+        return { chapter: updated };
       } catch (err) {
         const isAborted =
           controller.signal.aborted ||
@@ -2258,11 +2190,8 @@ export default function MacHuongCacStudioPage() {
     showToast('Đã hủy tác vụ AI Biên tập!');
   }, [showToast]);
 
-  // Smart AI Editorial:
-  // - If the chapter is flagged with QA Block Misalignment (!isBlockCountMatched or blockAlignmentPass === false)
-  //   OR has no dirty blocks (user wants full-chapter polish), sends the ENTIRE CHAPTER (`realign_chapter`)
-  //   so AI realigns all paragraphs 1:1 with raw Chinese blocks (`TITLE`, `P0001`..`Pxxxx`).
-  // - If the chapter is already 1:1 aligned and only has specific dirty blocks, sends only `dirtyTargets` (`block_cleanup`).
+  // Full-Chapter 1:1 AI Editorial & Block Realignment:
+  // STRICT INVARIANT: 1 Request = 100% Full Chapter (`realign_chapter`). Never split or subset chapter text.
   const handleRunBlockIdCleanup = async () => {
     if (!activeChapter) return;
     const draftChapter: Chapter = {
@@ -2271,8 +2200,6 @@ export default function MacHuongCacStudioPage() {
       translatedContent: editorContent,
     };
     const {
-      targets: dirtyTargets,
-      allPairs,
       isBlockCountMatched,
       rawBodyBlockCount,
       translatedBodyBlockCount,
@@ -2286,87 +2213,10 @@ export default function MacHuongCacStudioPage() {
     aiAssistAbortRef.current = controller;
     setAiAssistLoading(true);
     try {
-      if (isMisaligned || dirtyTargets.length === 0) {
-        const res = await safeFetchJson<{
-          titleTranslated?: string;
-          translatedContent?: string;
-          alignment?: ChapterAlignment;
-          modelUsed?: string;
-          keyUsed?: number;
-          error?: string;
-        }>(
-          '/api/editor/assist',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            signal: controller.signal,
-            body: JSON.stringify({
-              action: 'realign_chapter',
-              chapterNumber: activeChapter.chapterNumber,
-              titleRaw: activeChapter.titleRaw,
-              rawContent: activeChapter.rawContent,
-              titleTranslated: editorTitle || activeChapter.titleTranslated,
-              translatedContent:
-                editorContent || activeChapter.translatedContent,
-              systemInstruction: activeEditorialProfile.systemInstruction,
-              pronounRule: activeEditorialProfile.pronounRule,
-              includeGlossary: shouldSendGlossary,
-              glossary: enabledGlossaryItems,
-              model: modelConfig.selectedModel,
-              fallbackModel: effectiveFallbackModel,
-              thinkingLevel:
-                modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL,
-            }),
-          },
-          {
-            scope: 'AI_EDITOR',
-            label: isMisaligned
-              ? `Biên tập & Căn lại toàn Chương #${activeChapter.orderPrefix} (Lệch ${translatedBodyBlockCount}/${rawBodyBlockCount} đoạn)`
-              : `Biên tập toàn Chương 1:1 #${activeChapter.orderPrefix}`,
-          }
-        );
-        const data = res.data || {};
-        if (!res.ok || !res.data || !data.translatedContent) {
-          throw new Error(
-            data.error ||
-              res.errorMessage ||
-              'Lỗi khi gọi AI Biên Tập & Căn Chỉnh Toàn Chương'
-          );
-        }
-
-        const actualModelUsed: string =
-          data.modelUsed || modelConfig.selectedModel;
-        const actualKeyUsed: number | undefined =
-          typeof data.keyUsed === 'number' ? data.keyUsed : undefined;
-        const nextTitle =
-          data.titleTranslated || editorTitle || activeChapter.titleTranslated;
-        const nextContent = data.translatedContent;
-
-        pushEditorSnapshot(
-          nextTitle,
-          nextContent,
-          isMisaligned
-            ? `AI Căn chỉnh & Biên tập toàn chương 1:1 (${actualModelUsed})`
-            : `AI Biên tập toàn chương 1:1 (${actualModelUsed})`
-        );
-        await handleSaveEditorChanges(
-          nextTitle,
-          nextContent,
-          true,
-          data.alignment,
-          actualModelUsed,
-          actualKeyUsed
-        );
-        showToast(
-          isMisaligned
-            ? `Đã gửi cả chương & căn chỉnh lại khớp 1:1 (${data.alignment?.translatedBlockCount ?? rawBodyBlockCount}/${rawBodyBlockCount} đoạn) bằng ${actualModelUsed}!`
-            : `Đã biên tập toàn chương chuẩn 1:1 bằng ${actualModelUsed}!`
-        );
-        return;
-      }
-
       const res = await safeFetchJson<{
-        updates?: Array<{ id: string; translation: string }>;
+        titleTranslated?: string;
+        translatedContent?: string;
+        alignment?: ChapterAlignment;
         modelUsed?: string;
         keyUsed?: number;
         error?: string;
@@ -2377,9 +2227,13 @@ export default function MacHuongCacStudioPage() {
           headers: { 'Content-Type': 'application/json' },
           signal: controller.signal,
           body: JSON.stringify({
-            action: 'block_cleanup',
-            targets: dirtyTargets,
+            action: 'realign_chapter',
             chapterNumber: activeChapter.chapterNumber,
+            titleRaw: activeChapter.titleRaw,
+            rawContent: activeChapter.rawContent,
+            titleTranslated: editorTitle || activeChapter.titleTranslated,
+            translatedContent:
+              editorContent || activeChapter.translatedContent,
             systemInstruction: activeEditorialProfile.systemInstruction,
             pronounRule: activeEditorialProfile.pronounRule,
             includeGlossary: shouldSendGlossary,
@@ -2392,43 +2246,51 @@ export default function MacHuongCacStudioPage() {
         },
         {
           scope: 'AI_EDITOR',
-          label: `Dọn ${dirtyTargets.length} Block ID lỗi (Chương #${activeChapter.orderPrefix})`,
+          label: isMisaligned
+            ? `Biên tập & Căn lại toàn Chương #${activeChapter.orderPrefix} (Lệch ${translatedBodyBlockCount}/${rawBodyBlockCount} đoạn)`
+            : `Biên tập toàn Chương 1:1 #${activeChapter.orderPrefix}`,
         }
       );
       const data = res.data || {};
-      if (!res.ok || !res.data) {
+      const cleanBody = (data.translatedContent || '')
+        .replace(/\u200B/g, '')
+        .trim();
+
+      if (!res.ok || !res.data || !cleanBody) {
         throw new Error(
-          data.error || res.errorMessage || 'Lỗi khi gọi AI Dọn Lỗi Theo Block ID'
+          data.error ||
+            res.errorMessage ||
+            'Bản biên tập trả về từ máy chủ bị trống (0 ký tự). Đã chặn ghi đè chương.'
         );
       }
 
-      const updates: Array<{ id: string; translation: string }> =
-        data.updates || [];
-      const merged = applyBlockUpdatesToChapter(
-        allPairs,
-        updates,
-        editorTitle || activeChapter.titleTranslated
-      );
       const actualModelUsed: string =
         data.modelUsed || modelConfig.selectedModel;
       const actualKeyUsed: number | undefined =
         typeof data.keyUsed === 'number' ? data.keyUsed : undefined;
+      const nextTitle =
+        data.titleTranslated || editorTitle || activeChapter.titleTranslated;
+      const nextContent = data.translatedContent!;
 
       pushEditorSnapshot(
-        merged.titleTranslated,
-        merged.translatedContent,
-        `AI Dọn ${updates.length} Block ID lỗi (${actualModelUsed})`
+        nextTitle,
+        nextContent,
+        isMisaligned
+          ? `AI Căn chỉnh & Biên tập toàn chương 1:1 (${actualModelUsed})`
+          : `AI Biên tập toàn chương 1:1 (${actualModelUsed})`
       );
       await handleSaveEditorChanges(
-        merged.titleTranslated,
-        merged.translatedContent,
+        nextTitle,
+        nextContent,
         true,
-        merged.alignment,
+        data.alignment,
         actualModelUsed,
         actualKeyUsed
       );
       showToast(
-        `Đã dọn sạch ${updates.length}/${dirtyTargets.length} Block ID lỗi bằng ${actualModelUsed}!`
+        isMisaligned
+          ? `Đã gửi cả chương & căn chỉnh lại khớp 1:1 (${data.alignment?.translatedBlockCount ?? rawBodyBlockCount}/${rawBodyBlockCount} đoạn) bằng ${actualModelUsed}!`
+          : `Đã biên tập toàn chương chuẩn 1:1 bằng ${actualModelUsed}!`
       );
     } catch (err) {
       if (
@@ -3187,12 +3049,12 @@ export default function MacHuongCacStudioPage() {
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[#FBF8F1] text-[#1C1917]">
       {/* 1. TOP BAR CONTRACT (52px height, 3 clean zones) */}
-      <header className="flex h-[52px] shrink-0 items-center justify-between border-b border-[#E5DEC9] bg-[#F3EFE6] px-3 select-none">
+      <header className="flex h-[52px] shrink-0 items-center justify-between gap-2 overflow-x-auto border-b border-[#E5DEC9] bg-[#F3EFE6] px-2.5 select-none">
         {/* Left Zone: Sidebar Toggle + Brand + Novel Switcher */}
-        <div className="flex items-center gap-2.5">
+        <div className="flex shrink-0 items-center gap-1.5">
           <button
             onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="rounded-lg p-1.5 text-[#605A52] hover:bg-[#E5DEC9]/60 hover:text-[#1C1917]"
+            className="shrink-0 rounded-lg p-1.5 text-[#605A52] hover:bg-[#E5DEC9]/60 hover:text-[#1C1917]"
             title={sidebarOpen ? 'Thu gọn danh sách chương' : 'Mở danh sách chương'}
           >
             {sidebarOpen ? (
@@ -3202,11 +3064,11 @@ export default function MacHuongCacStudioPage() {
             )}
           </button>
 
-          <div className="flex shrink-0 items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1.5">
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#8C2D19] font-serif text-xs font-bold text-white shadow-2xs">
               墨
             </span>
-            <span className="hidden whitespace-nowrap font-serif text-sm font-bold tracking-tight text-[#1C1917] sm:inline">
+            <span className="hidden whitespace-nowrap font-serif text-sm font-bold tracking-tight text-[#1C1917] lg:inline">
               Mặc Hương Các
             </span>
           </div>
@@ -3214,16 +3076,16 @@ export default function MacHuongCacStudioPage() {
           <div className="h-4 w-[1px] shrink-0 bg-[#E5DEC9]" />
 
           {/* Novel Library Button + Quick Switcher */}
-          <div className="flex items-center gap-1.5">
+          <div className="flex shrink-0 items-center gap-1">
             <button
               type="button"
               onClick={handleOpenLibraryModal}
-              className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#8C2D19]/35 bg-[#8C2D19]/10 px-2.5 py-1.5 text-xs font-bold text-[#8C2D19] transition hover:bg-[#8C2D19] hover:text-white"
+              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-[#8C2D19]/35 bg-[#8C2D19]/10 px-2 py-1.5 text-xs font-bold text-[#8C2D19] transition hover:bg-[#8C2D19] hover:text-white"
               title={`Mở Thư Viện & Bảng Điều Khiển Tiến Độ Toàn Thư Viện — ${novels.length} bộ truyện · Đã dịch ${libraryGlobalStats.totalTranslated}/${libraryGlobalStats.totalChapters} chương (${libraryGlobalStats.pct}%) · Đã duyệt ${libraryGlobalStats.totalEdited} chương`}
             >
               <Library className="h-3.5 w-3.5" />
               <span>Thư Viện</span>
-              <span className="font-mono text-[10px] opacity-90">
+              <span className="hidden font-mono text-[10px] opacity-90 sm:inline">
                 {novels.length} bộ · {libraryGlobalStats.pct}%
               </span>
             </button>
@@ -3234,7 +3096,7 @@ export default function MacHuongCacStudioPage() {
                 if (e.target.value) handleSelectNovel(e.target.value);
               }}
               disabled={novels.length === 0}
-              className="max-w-[170px] truncate rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] focus:border-[#8C2D19] focus:outline-hidden disabled:opacity-60"
+              className="w-[120px] min-w-0 max-w-[120px] shrink-0 truncate rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2 py-1.5 text-xs font-semibold text-[#1C1917] focus:border-[#8C2D19] focus:outline-hidden disabled:opacity-60 xl:w-[140px] xl:max-w-[140px]"
               title="Chuyển nhanh giữa các bộ truyện trong Thư viện"
             >
               {novels.length === 0 ? (
@@ -3264,33 +3126,36 @@ export default function MacHuongCacStudioPage() {
         <div className="flex shrink-0 items-center rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] p-0.5">
           <button
             onClick={() => setWorkspaceMode('editor')}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-xs font-semibold transition ${
+            className={`flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-semibold transition ${
               workspaceMode === 'editor'
                 ? 'bg-[#8C2D19] text-white shadow-2xs'
                 : 'text-[#605A52] hover:text-[#1C1917]'
             }`}
           >
             <Columns className="h-3.5 w-3.5" />
-            Biên tập bản dịch
+            <span>
+              Biên tập<span className="hidden 2xl:inline"> bản dịch</span>
+            </span>
           </button>
           <button
             onClick={() => setWorkspaceMode('reader')}
-            className={`flex items-center gap-1.5 whitespace-nowrap rounded-md px-3 py-1 text-xs font-semibold transition ${
+            className={`flex items-center gap-1 whitespace-nowrap rounded-md px-2.5 py-1 text-xs font-semibold transition ${
               workspaceMode === 'reader'
                 ? 'bg-[#8C2D19] text-white shadow-2xs'
                 : 'text-[#605A52] hover:text-[#1C1917]'
             }`}
           >
             <BookOpen className="h-3.5 w-3.5" />
-            Đọc
+            <span>Đọc</span>
           </button>
         </div>
 
         {/* Right Zone: Import, Presets/Model (incl. Glossary), Reader Appearance, Terminal, Guide, Export/Backup */}
-        <div className="flex shrink-0 items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-1">
           <button
             onClick={() => setIsImportModalOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
+            title="Nhập chương nguyên tác chữ Hán (.TXT, .EPUB, Regex, URL)"
           >
             <FolderUp className="h-3.5 w-3.5 text-[#8C2D19]" />
             <span className="hidden md:inline">Nhập Chương</span>
@@ -3301,23 +3166,23 @@ export default function MacHuongCacStudioPage() {
               setInstructionsModalTab('instructions');
               setIsInstructionsModalOpen(true);
             }}
-            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
             title={`Quản lý Preset Dịch, Preset Biên Tập AI, Từ Điển Glossary & Chọn Model (${modelConfig.selectedModel} • Thinking: ${modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL})`}
           >
             <Sliders className="h-3.5 w-3.5 text-[#8C2D19]" />
             <span className="hidden lg:inline">Preset &amp; Model</span>
-            <span className="rounded bg-[#8C2D19]/12 px-1.5 py-0.2 font-mono text-[10px] font-bold text-[#8C2D19]">
+            <span className="max-w-[115px] truncate rounded bg-[#8C2D19]/12 px-1.5 py-0.2 font-mono text-[10px] font-bold text-[#8C2D19]">
               {modelConfig.selectedModel}
             </span>
             <span
-              className="rounded border border-[#8C2D19]/30 bg-white px-1.5 py-0.2 font-mono text-[10px] font-bold text-[#8C2D19]"
+              className="rounded border border-[#8C2D19]/30 bg-white px-1 py-0.2 font-mono text-[10px] font-bold text-[#8C2D19]"
               title={`Mức suy luận AI hiện tại: ${modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL} (Mặc định: high)`}
             >
               {(modelConfig.thinkingLevel || DEFAULT_THINKING_LEVEL).toUpperCase()}
             </span>
             {shouldSendGlossary && (
               <span
-                className="rounded bg-[#1E6F50]/15 px-1.5 py-0.2 font-mono text-[10px] font-bold text-[#1E6F50]"
+                className="rounded bg-[#1E6F50]/15 px-1 py-0.2 font-mono text-[10px] font-bold text-[#1E6F50]"
                 title="Đang BẬT gửi kèm bảng Glossary"
               >
                 Gloss
@@ -3327,16 +3192,16 @@ export default function MacHuongCacStudioPage() {
 
           <button
             onClick={() => setIsAppearanceModalOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
-            title="Màu nền HEX/RGB, Phông chữ & Căn đều Justify"
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
+            title="Giao Diện Đọc: Màu nền HEX/RGB, Phông chữ & Căn đều Justify"
           >
             <Palette className="h-3.5 w-3.5 text-[#8C2D19]" />
-            <span className="hidden xl:inline">Giao Diện Đọc</span>
+            <span className="hidden 2xl:inline">Giao Diện Đọc</span>
           </button>
 
           <button
             onClick={() => setIsTerminalOpen(!isTerminalOpen)}
-            className={`inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border px-2.5 py-1.5 text-xs font-semibold transition ${
+            className={`inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border px-2 py-1.5 text-xs font-semibold transition ${
               terminalCounts.errors > 0
                 ? 'border-red-300 bg-red-50 text-red-800 hover:bg-red-100'
                 : isTerminalOpen
@@ -3348,11 +3213,11 @@ export default function MacHuongCacStudioPage() {
             <Terminal className="h-3.5 w-3.5 text-[#8C2D19]" />
             <span className="hidden sm:inline">Terminal</span>
             {terminalCounts.errors > 0 ? (
-              <span className="rounded bg-red-600 px-1.5 py-0.2 font-mono text-[10px] font-bold text-white">
+              <span className="rounded bg-red-600 px-1 py-0.2 font-mono text-[10px] font-bold text-white">
                 {terminalCounts.errors} lỗi
               </span>
             ) : (
-              <span className="rounded bg-[#8C2D19]/12 px-1.5 py-0.2 font-mono text-[10px] font-bold text-[#8C2D19]">
+              <span className="rounded bg-[#8C2D19]/12 px-1 py-0.2 font-mono text-[10px] font-bold text-[#8C2D19]">
                 {terminalCounts.total}
               </span>
             )}
@@ -3360,16 +3225,17 @@ export default function MacHuongCacStudioPage() {
 
           <button
             onClick={() => setIsUserGuideOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg border border-[#E5DEC9] bg-[#FBF8F1] px-2 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#E5DEC9]/60"
             title="Mở Cẩm Nang Hướng Dẫn Sử Dụng chi tiết & Tải tài liệu (.md)"
           >
             <HelpCircle className="h-3.5 w-3.5 text-[#8C2D19]" />
-            <span className="hidden xl:inline">Hướng Dẫn</span>
+            <span className="hidden 2xl:inline">Hướng Dẫn</span>
           </button>
 
           <button
             onClick={() => setIsExportModalOpen(true)}
-            className="inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-lg bg-[#8C2D19] px-3 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-[#722211]"
+            className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded-lg bg-[#8C2D19] px-2.5 py-1.5 text-xs font-semibold text-white shadow-2xs hover:bg-[#722211]"
+            title="Xuất sách điện tử W3C EPUB 3.3, TXT & Sao lưu dự án .ZIP Backup v5"
           >
             <Download className="h-3.5 w-3.5" />
             <span className="hidden sm:inline">EPUB &amp; Backup</span>
@@ -4303,7 +4169,7 @@ export default function MacHuongCacStudioPage() {
                     <button
                       onClick={handleRunBlockIdCleanup}
                       className="inline-flex items-center gap-1 rounded-lg border border-[#C9B99A] bg-white px-2.5 py-1.5 text-xs font-semibold text-[#1C1917] hover:bg-[#F3EFE6]"
-                      title="AI Biên tập & Dọn riêng các Block ID bị sót Hán tự / lọt từ tiếng Anh / thiếu dịch"
+                      title="AI Biên tập toàn chương 1:1 Block-ID (realign_chapter): chuốt mượt văn phong, dọn sạch Hán tự sót, từ tiếng Anh lọt và bù đoạn khuyết"
                     >
                       <Wand2 className="h-3.5 w-3.5 text-[#8C2D19]" />
                       <span>AI biên tập</span>
@@ -4788,8 +4654,8 @@ export default function MacHuongCacStudioPage() {
                                   className="inline-flex items-center gap-1 rounded-md bg-[#1E6F50] px-2.5 py-0.5 text-[11px] font-bold text-white hover:bg-[#16563D] disabled:opacity-45"
                                   title={
                                     !activeChapterBlockAnalysis.isBlockCountMatched
-                                      ? 'Chương đang bị lệch đoạn: Gửi toàn bộ chương để AI đối chiếu nguyên tác và căn chỉnh lại khớp 1:1 từng đoạn P0001..Pxxxx'
-                                      : 'Gửi riêng các Block ID bị lỗi để AI làm sạch nhanh'
+                                      ? 'Chương đang bị lệch đoạn: Gửi toàn bộ chương (realign_chapter) để AI đối chiếu nguyên tác và căn chỉnh lại khớp 1:1 từng đoạn P0001..Pxxxx'
+                                      : 'Gửi toàn bộ chương theo chuẩn 1:1 Block-ID (realign_chapter) để AI biên tập và làm sạch các Block ID bị lỗi'
                                   }
                                 >
                                   <Wand2 className="h-3 w-3" />
@@ -4797,7 +4663,7 @@ export default function MacHuongCacStudioPage() {
                                     ? 'Đang xử lý...'
                                     : !activeChapterBlockAnalysis.isBlockCountMatched
                                       ? `AI Căn Lại & Biên Tập Cả Chương (${activeChapterBlockAnalysis.translatedBodyBlockCount}/${activeChapterBlockAnalysis.rawBodyBlockCount})`
-                                      : `AI Dọn ${dirtyBlocksCount} Block Lỗi`}
+                                      : `AI Biên Tập & Dọn ${dirtyBlocksCount} Block Lỗi`}
                                 </button>
                               </>
                             )}

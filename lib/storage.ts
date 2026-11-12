@@ -172,21 +172,32 @@ export async function getAllNovelLibrarySummaries(
         if (!summary) continue;
         summary.totalChapters++;
         summary.totalRawChars += ch.charCount || 0;
-        if (ch.status === 'translated' || ch.status === 'edited') {
+        const cleanBody = (ch.translatedContent || '')
+          .replace(/\u200B/g, '')
+          .trim();
+        const effectiveStatus =
+          (ch.status === 'translated' ||
+            ch.status === 'edited' ||
+            ch.status === 'translating' ||
+            ch.status === 'queued') &&
+          cleanBody.length === 0
+            ? 'raw'
+            : ch.status;
+
+        if (effectiveStatus === 'translated' || effectiveStatus === 'edited') {
           summary.translatedChapters++;
         }
-        if (ch.status === 'edited') {
+        if (effectiveStatus === 'edited') {
           summary.editedChapters++;
         }
-        if (ch.status === 'raw') {
+        if (effectiveStatus === 'raw') {
           summary.rawChapters++;
         }
-        if (ch.status === 'error') {
+        if (effectiveStatus === 'error') {
           summary.errorChapters++;
         }
-        if (ch.translatedContent) {
-          summary.totalTranslatedWords += ch.translatedContent
-            .trim()
+        if (cleanBody) {
+          summary.totalTranslatedWords += cleanBody
             .split(/\s+/)
             .filter(Boolean).length;
         }
@@ -245,16 +256,51 @@ export async function duplicateNovelProject(
 
 export async function getChaptersByNovel(novelId: string): Promise<Chapter[]> {
   const db = await openDatabase();
-  return new Promise((resolve, reject) => {
+  const { list, healedToPersist } = await new Promise<{
+    list: Chapter[];
+    healedToPersist: Chapter[];
+  }>((resolve, reject) => {
     const tx = db.transaction('chapters', 'readonly');
     const idx = tx.objectStore('chapters').index('novelId');
     const req = idx.getAll(novelId);
     req.onsuccess = () => {
-      const list = ((req.result as Chapter[]) || []).map((ch) => ({
-        ...ch,
-        titleTranslated: normalizeVietnameseText(ch.titleTranslated || ''),
-        translatedContent: normalizeVietnameseText(ch.translatedContent || ''),
-      }));
+      const healedToPersist: Chapter[] = [];
+      const list = ((req.result as Chapter[]) || []).map((ch) => {
+        const cleanTitle = normalizeVietnameseText(ch.titleTranslated || '');
+        const cleanContent = normalizeVietnameseText(ch.translatedContent || '');
+        const hasVisibleContent =
+          cleanContent.replace(/\u200B/g, '').trim().length > 0;
+
+        // Auto-heal ghost-translated or stuck chapters whose translatedContent is empty
+        if (
+          !hasVisibleContent &&
+          (ch.status === 'translated' ||
+            ch.status === 'edited' ||
+            ch.status === 'translating' ||
+            ch.status === 'queued')
+        ) {
+          const healed: Chapter = {
+            ...ch,
+            titleTranslated: '',
+            translatedContent: '',
+            status: 'raw',
+            translatedByModel: undefined,
+            lastKeyUsed: undefined,
+            alignment: undefined,
+            qaReport: undefined,
+            lastError: undefined,
+            updatedAt: Date.now(),
+          };
+          healedToPersist.push(healed);
+          return healed;
+        }
+
+        return {
+          ...ch,
+          titleTranslated: cleanTitle,
+          translatedContent: cleanContent,
+        };
+      });
       list.sort((a, b) => {
         const cmpPrefix = a.orderPrefix.localeCompare(b.orderPrefix, undefined, {
           numeric: true,
@@ -262,18 +308,54 @@ export async function getChaptersByNovel(novelId: string): Promise<Chapter[]> {
         if (cmpPrefix !== 0) return cmpPrefix;
         return a.chapterNumber - b.chapterNumber;
       });
-      resolve(list);
+      resolve({ list, healedToPersist });
     };
     req.onerror = () => reject(req.error);
   });
+
+  if (healedToPersist.length > 0) {
+    logger.info(
+      'STORAGE',
+      `⚡ Đã tự động khôi phục ${healedToPersist.length} chương bị trạng thái "Hoàn thành ảo / Đang dịch kẹt" (nội dung dịch trống 0 ký tự) về trạng thái "Chưa dịch" để sẵn sàng dịch lại: ${healedToPersist
+        .slice(0, 12)
+        .map((c) => `#${c.orderPrefix}`)
+        .join(', ')}${healedToPersist.length > 12 ? '...' : ''}`,
+      {
+        novelId,
+        healedCount: healedToPersist.length,
+        healedOrderPrefixes: healedToPersist.map((c) => c.orderPrefix),
+      }
+    );
+    try {
+      await saveChaptersBulk(healedToPersist);
+    } catch {
+      // Ignore background persistence error
+    }
+  }
+
+  return list;
 }
 
 export async function saveChapter(chapter: Chapter): Promise<void> {
   const db = await openDatabase();
+  const cleanTitle = normalizeVietnameseText(chapter.titleTranslated || '');
+  const cleanContent = normalizeVietnameseText(chapter.translatedContent || '');
+  const hasVisibleContent =
+    cleanContent.replace(/\u200B/g, '').trim().length > 0;
+  const safeStatus =
+    !hasVisibleContent &&
+    (chapter.status === 'translated' || chapter.status === 'edited')
+      ? 'raw'
+      : chapter.status;
+
   const normalized: Chapter = {
     ...chapter,
-    titleTranslated: normalizeVietnameseText(chapter.titleTranslated || ''),
-    translatedContent: normalizeVietnameseText(chapter.translatedContent || ''),
+    titleTranslated: cleanTitle,
+    translatedContent: cleanContent,
+    status: safeStatus,
+    translatedByModel:
+      safeStatus === 'raw' ? undefined : chapter.translatedByModel,
+    alignment: safeStatus === 'raw' ? undefined : chapter.alignment,
   };
   return new Promise((resolve, reject) => {
     const tx = db.transaction('chapters', 'readwrite');
@@ -293,10 +375,24 @@ export async function saveChaptersBulk(chapters: Chapter[]): Promise<void> {
       const tx = db.transaction('chapters', 'readwrite');
       const store = tx.objectStore('chapters');
       for (const ch of slice) {
+        const cleanTitle = normalizeVietnameseText(ch.titleTranslated || '');
+        const cleanContent = normalizeVietnameseText(ch.translatedContent || '');
+        const hasVisibleContent =
+          cleanContent.replace(/\u200B/g, '').trim().length > 0;
+        const safeStatus =
+          !hasVisibleContent &&
+          (ch.status === 'translated' || ch.status === 'edited')
+            ? 'raw'
+            : ch.status;
+
         store.put({
           ...ch,
-          titleTranslated: normalizeVietnameseText(ch.titleTranslated || ''),
-          translatedContent: normalizeVietnameseText(ch.translatedContent || ''),
+          titleTranslated: cleanTitle,
+          translatedContent: cleanContent,
+          status: safeStatus,
+          translatedByModel:
+            safeStatus === 'raw' ? undefined : ch.translatedByModel,
+          alignment: safeStatus === 'raw' ? undefined : ch.alignment,
         });
       }
       tx.oncomplete = () => resolve();
